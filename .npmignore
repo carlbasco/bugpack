@@ -1,0 +1,8 @@
+src/
+test/
+coverage/
+*.config.*
+tsconfig.json
+.editorconfig
+.gitignore
+*.tsbuildinfo

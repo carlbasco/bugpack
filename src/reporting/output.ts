@@ -1,0 +1,24 @@
+import { strToU8, zip } from 'fflate';
+import type { BugPackObjectReport } from './types.js';
+
+export async function createZipOutput(report: BugPackObjectReport): Promise<Blob> {
+    const manifest = {
+        ...report,
+        screenshot: { contentType: 'image/png', file: 'screenshot.png' },
+        annotatedScreenshot: { contentType: 'image/png', file: 'annotated-screenshot.png' },
+    };
+    const screenshot = new Uint8Array(await report.screenshot.data.arrayBuffer());
+    const annotatedScreenshot = new Uint8Array(await report.annotatedScreenshot.data.arrayBuffer());
+    const archive = await new Promise<Uint8Array>((resolve, reject) => {
+        zip(
+            {
+                'report.json': strToU8(JSON.stringify(manifest, null, 2)),
+                'screenshot.png': [screenshot, { level: 0 }],
+                'annotated-screenshot.png': [annotatedScreenshot, { level: 0 }],
+            },
+            { level: 0 },
+            (error, result) => (error === null ? resolve(result) : reject(error)),
+        );
+    });
+    return new Blob([new Uint8Array(archive).buffer], { type: 'application/zip' });
+}

@@ -1,0 +1,24 @@
+export type NetworkCapture = 'fetch' | 'xhr';
+export type NetworkResult = 'SUCCESS' | 'ERROR' | 'PENDING';
+
+export interface NetworkDiagnosticsOptions {
+    enabled?: boolean;
+    maxRequests?: number;
+    capture?: NetworkCapture[];
+}
+
+export interface NetworkLogRecord {
+    timestamp: string;
+    url: string;
+    method: string;
+    /** HTTP response status code, when a response was received. */
+    responseStatus?: number;
+    /** BugPack's lifecycle/result for the request. */
+    result: NetworkResult;
+    duration: number;
+    error?: string;
+    /** Sanitized, truncated body captured only for textual 4xx and 5xx responses. */
+    responseBody?: string;
+    /** Sanitized response headers captured only for 4xx and 5xx responses. */
+    responseHeaders?: Record<string, string>;
+}

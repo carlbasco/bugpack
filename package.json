@@ -1,0 +1,66 @@
+{
+    "name": "@bugpack/core",
+    "version": "0.1.0",
+    "description": "Framework-agnostic client-side bug report capture library.",
+    "license": "MIT",
+    "type": "module",
+    "packageManager": "yarn@1.22.22",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        }
+    },
+    "typesVersions": {
+        "*": {
+            "*": [
+                "dist/index.d.ts"
+            ]
+        }
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "sideEffects": false,
+    "engines": {
+        "node": ">=20"
+    },
+    "scripts": {
+        "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --loader .html=text --loader .css=text",
+        "typecheck": "tsc --noEmit",
+        "lint": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "test": "vitest run",
+        "prepublishOnly": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+    },
+    "keywords": [
+        "bug-reporting",
+        "frontend",
+        "diagnostics",
+        "typescript"
+    ],
+    "dependencies": {
+        "fflate": "^0.8.2",
+        "html2canvas": "^1.4.1"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.0.0",
+        "eslint": "^9.0.0",
+        "eslint-config-prettier": "^10.1.8",
+        "happy-dom": "^18.0.1",
+        "prettier": "^3.0.0",
+        "tsup": "^8.0.0",
+        "typescript": "^5.0.0",
+        "typescript-eslint": "^8.0.0",
+        "vitest": "^3.0.0"
+    }
+}

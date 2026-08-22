@@ -1,0 +1,50 @@
+:host {
+    transition: transform 160ms ease-out;
+}
+:host([data-position='middle-left']) {
+    transform: translateY(-50%) translateX(-75%);
+}
+:host([data-position='middle-right']) {
+    transform: translateY(-50%) translateX(75%);
+}
+:host([data-position='middle-left']:hover),
+:host([data-position='middle-left']:focus-within),
+:host([data-position='middle-right']:hover),
+:host([data-position='middle-right']:focus-within) {
+    transform: translateY(-50%) translateX(0);
+}
+button {
+    border: 0;
+    border-radius: 999px;
+    padding: 12px 16px;
+    background: #5b21b6;
+    color: white;
+    font:
+        600 14px/1 system-ui,
+        sans-serif;
+    cursor: pointer;
+    box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
+}
+:host([data-position^='middle-']) button {
+    width: 100px;
+    background: #4c1d95;
+}
+:host([data-position='middle-right']) button {
+    border-top-left-radius: 25px;
+    border-bottom-left-radius: 25px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+:host([data-position='middle-left']) button {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-top-right-radius: 25px;
+    border-bottom-right-radius: 25px;
+}
+button:hover {
+    background: #4c1d95;
+}
+button:focus-visible {
+    outline: 3px solid #c4b5fd;
+    outline-offset: 2px;
+}
