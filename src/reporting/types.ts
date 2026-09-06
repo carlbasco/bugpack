@@ -1,5 +1,6 @@
 import type { ConsoleLogRecord } from '../diagnostics/console/types.js';
 import type { NetworkLogRecord } from '../diagnostics/network/types.js';
+import type { JavascriptErrorRecord } from '../diagnostics/javascript-errors/types.js';
 import type { JsonObject } from '../shared/types.js';
 
 export interface BrowserReport {
@@ -17,10 +18,7 @@ export interface PageReport {
     route: string;
 }
 
-export interface JavascriptErrorRecord {
-    timestamp: string;
-    message: string;
-}
+export type { JavascriptErrorRecord } from '../diagnostics/javascript-errors/types.js';
 
 export interface DiagnosticReport {
     formatVersion: 1;

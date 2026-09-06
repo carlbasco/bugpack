@@ -1,8 +1,12 @@
+export type NetworkStatusGroup = '2xx' | '3xx' | '4xx' | '5xx';
+
 export type NetworkCapture = 'fetch' | 'xhr';
 export type NetworkResult = 'SUCCESS' | 'ERROR' | 'PENDING';
 
 export interface NetworkDiagnosticsOptions {
     enabled?: boolean;
+    /** Omit to retain all requests, including pending and transport failures. */
+    statuses?: NetworkStatusGroup[];
     maxRequests?: number;
     capture?: NetworkCapture[];
 }

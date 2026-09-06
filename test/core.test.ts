@@ -35,25 +35,20 @@ describe('configuration', () => {
 
     it('applies conservative defaults', () => {
         const options = normalizeOptions({ onSubmit });
-        expect(options.diagnostics.console).toEqual({ enabled: false, maxEntries: 50 });
+        expect(options.diagnostics.console).toEqual({
+            enabled: false,
+            maxEntries: 50,
+            levels: ['error'],
+        });
         expect(options.diagnostics.network).toEqual({
             enabled: false,
             maxRequests: 50,
             capture: ['fetch', 'xhr'],
+            statuses: undefined,
         });
-        expect(options.floatingButton).toEqual({ enabled: true, position: 'bottom-right' });
         expect(options.reportButtonText).toBe('Report a bug');
         expect(options.outputFormat).toBe('object');
     });
-
-    it.each(['middle-left', 'middle-right'] as const)(
-        'accepts the centered floating-button position %s',
-        (position) => {
-            expect(
-                normalizeOptions({ floatingButton: { position }, onSubmit }).floatingButton,
-            ).toEqual({ enabled: true, position });
-        },
-    );
 
     it.each([0, -1, 1.5])('rejects invalid diagnostic limits (%s)', (maxEntries) => {
         expect(() =>
@@ -75,18 +70,19 @@ describe('configuration', () => {
 
     it.each([
         { diagnostics: { console: { enabled: 'yes' } }, onSubmit: vi.fn() },
-        { floatingButton: { enabled: 1 }, onSubmit: vi.fn() },
+        { diagnostics: { console: { levels: ['debug'] } }, onSubmit: vi.fn() },
+        { diagnostics: { network: { statuses: ['6xx'] } }, onSubmit: vi.fn() },
         { output: { format: 'tar' }, onSubmit: vi.fn() },
-        { resolveMetadata: 'later', onSubmit: vi.fn() },
+        { metadata: 'later', onSubmit: vi.fn() },
         { reportButtonText: '   ', onSubmit: vi.fn() },
     ])('rejects invalid runtime options', (options) => {
         expect(() => normalizeOptions(options as unknown as BugPackOptions)).toThrow();
     });
 
     it('rejects an invalid masking selector during initialization', () => {
-        expect(() => normalizeOptions({ privacy: { maskTextSelectors: ['['] }, onSubmit })).toThrow(
-            /mask selector/u,
-        );
+        expect(() =>
+            normalizeOptions({ privacy: { maskElementSelectors: ['['] }, onSubmit }),
+        ).toThrow(/mask selector/u);
     });
 });
 
@@ -123,6 +119,27 @@ describe('PrivacyFilter', () => {
                 'X-Request-Id': 'request-123',
             }),
         ).toEqual({ 'Content-Type': 'application/json' });
+    });
+
+    it('bounds sanitized diagnostic text and response header values', () => {
+        const privacy = new PrivacyFilter([], []);
+        expect(privacy.sanitizeBoundedText('x'.repeat(20_000))).toContain('[truncated]');
+        expect(
+            privacy.sanitizeNetworkHeaders({ 'X-Large': 'x'.repeat(20_000) })?.['X-Large'],
+        ).toContain('[truncated]');
+        const error = new Error('message');
+        error.name = `token=secret ${'x'.repeat(20_000)}`;
+        const sanitizedError = privacy.sanitize(error);
+        if (
+            sanitizedError === null ||
+            Array.isArray(sanitizedError) ||
+            typeof sanitizedError !== 'object' ||
+            typeof sanitizedError.name !== 'string'
+        ) {
+            throw new TypeError('Expected a sanitized Error object.');
+        }
+        expect(sanitizedError.name).toContain('token=[REDACTED]');
+        expect(sanitizedError.name.length).toBeLessThan(20_000);
     });
 
     it('does not invoke hostile property getters', () => {

@@ -1,12 +1,14 @@
 import type { ConsoleDiagnosticsOptions } from '../diagnostics/console/types.js';
 import type { NetworkDiagnosticsOptions } from '../diagnostics/network/types.js';
+import type { JavascriptErrorDiagnosticsOptions } from '../diagnostics/javascript-errors/types.js';
 import type { PrivacyOptions } from '../privacy/types.js';
 import type { BugPackObjectReport } from '../reporting/types.js';
 import type { JsonObject, MaybePromise } from '../shared/types.js';
-import type { FloatingButtonOptions } from '../ui/types.js';
+import type { DialogOptions } from '../ui/types.js';
 
 export interface DiagnosticsOptions {
     console?: ConsoleDiagnosticsOptions;
+    javascriptErrors?: JavascriptErrorDiagnosticsOptions;
     network?: NetworkDiagnosticsOptions;
 }
 
@@ -18,13 +20,15 @@ export interface ZipOutputOptions {
     format: 'zip';
 }
 
+export type MetadataResolver = (options: { signal: AbortSignal }) => MaybePromise<JsonObject>;
+
 interface CommonBugPackOptions {
-    /** Label used for both the floating report button and report dialog title. */
+    dialog?: DialogOptions;
+    /** Report dialog title. */
     reportButtonText?: string;
-    metadata?: JsonObject;
-    resolveMetadata?: (options: { signal: AbortSignal }) => MaybePromise<JsonObject>;
+    /** Static metadata, or a resolver invoked when each report starts. */
+    metadata?: JsonObject | MetadataResolver;
     diagnostics?: DiagnosticsOptions;
-    floatingButton?: FloatingButtonOptions;
     privacy?: PrivacyOptions;
 }
 
@@ -44,5 +48,6 @@ export interface BugPack {
     enable(): void;
     disable(): void;
     dispose(): void;
-    report(): Promise<void>;
+    /** Starts the report flow. Safe to bind directly; failures are handled internally. */
+    report(this: void): void;
 }

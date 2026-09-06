@@ -54,18 +54,15 @@ describe('annotation editor', () => {
         };
 
         editor.setTool('select');
+        expect(canvas.style.cursor).toBe('default');
         pointer('pointerdown', 100, 60);
-        expect(canvas.style.cursor).toContain('data:image/svg+xml');
-        expect(canvas.style.cursor).toContain('black');
-        expect(canvas.style.cursor).toContain('dbeafe');
+        expect(canvas.style.cursor).toBe('move');
         pointer('pointermove', 130, 80);
         pointer('pointerup', 130, 80);
 
         expect(scrollContainer.scrollLeft).toBe(50);
         expect(scrollContainer.scrollTop).toBe(20);
-        expect(canvas.style.cursor).toContain('data:image/svg+xml');
-        expect(canvas.style.cursor).toContain('black');
-        expect(canvas.style.cursor).toContain('white');
+        expect(canvas.style.cursor).toBe('default');
     });
 
     it('selects a pencil stroke so the delete action can remove it', () => {
@@ -162,9 +159,19 @@ describe('annotation editor', () => {
         expect(canvas.style.cursor).toContain('data:image/svg+xml');
         expect(canvas.style.cursor).toContain('black');
 
+        const pencilCursor = canvas.style.cursor;
+        expect(pencilCursor).toContain('3 21, crosshair');
         editor.setColor('#2563eb');
         expect(canvas.style.cursor).toContain('black');
 
+        editor.setTool('rectangle');
+        expect(canvas.style.cursor).not.toBe(pencilCursor);
+        expect(canvas.style.cursor).toContain('12 12, crosshair');
+        const rectangleCursor = canvas.style.cursor;
+        editor.setColor('#2563eb');
+        expect(canvas.style.cursor).toBe(rectangleCursor);
+        editor.setTool('pencil');
+        expect(canvas.style.cursor).toBe(pencilCursor);
         editor.setTool('rectangle');
         pointer('pointerdown', 20, 20);
         pointer('pointermove', 80, 60);
@@ -173,9 +180,12 @@ describe('annotation editor', () => {
         expect(context.strokeStyle).toBe('#2563eb');
 
         editor.setTool('select');
+        expect(canvas.style.cursor).toBe('default');
         pointer('pointerdown', 50, 40);
+        expect(canvas.style.cursor).toBe('move');
         pointer('pointermove', 70, 50);
         pointer('pointerup', 70, 50);
+        expect(canvas.style.cursor).toBe('default');
         expect(strokeRect).toHaveBeenCalledWith(40, 30, 60, 40);
 
         pointer('pointerdown', 100, 70);
@@ -183,10 +193,15 @@ describe('annotation editor', () => {
         pointer('pointerup', 130, 90);
         expect(strokeRect).toHaveBeenCalledWith(40, 30, 90, 60);
 
-        editor.setTool('select');
-        pointer('pointerdown', 20, 20);
-        pointer('pointermove', 30, 25);
-        pointer('pointerup', 30, 25);
+        // Resize from the north-west handle, then move the normalized rectangle.
+        pointer('pointerdown', 40, 30);
+        pointer('pointermove', 30, 20);
+        pointer('pointerup', 30, 20);
+        expect(strokeRect).toHaveBeenCalledWith(30, 20, 100, 70);
+        pointer('pointerdown', 50, 40);
+        pointer('pointermove', 60, 50);
+        pointer('pointerup', 60, 50);
+        expect(strokeRect).toHaveBeenCalledWith(40, 30, 100, 70);
         editor.prepareExport();
         expect(setLineDash).toHaveBeenLastCalledWith([]);
     });

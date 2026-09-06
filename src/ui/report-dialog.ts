@@ -1,14 +1,14 @@
 import { canvasToBlob } from '../reporting/capture.js';
 import { abortReason, raceWithAbort, throwIfAborted } from '../shared/abort.js';
 import { createAnnotationEditor } from './annotation-editor.js';
-import type { AnnotationTool } from './annotation-editor.js';
+import type { AnnotationTool, DialogOptions, DialogLabels, ReportDialogResult } from './types.js';
+import {
+    DEFAULT_DIALOG_LABELS,
+    normalizeDialogOptions,
+    buttonTextColor,
+} from './dialog-options.js';
 import dialogStyles from './templates/report-dialog.css';
 import dialogTemplate from './templates/report-dialog.html';
-
-export interface ReportDialogResult {
-    annotatedScreenshot: Blob;
-    userComment: string;
-}
 
 let dialogSequence = 0;
 const DIALOG_CONTENT_MAX_WIDTH = 880;
@@ -44,7 +44,10 @@ export async function openReportDialog(
     screenshot: Blob,
     signal: AbortSignal,
     title = 'Report a bug',
+    options: DialogOptions = {},
 ): Promise<ReportDialogResult | undefined> {
+    const normalized = normalizeDialogOptions(options);
+    const labels = { ...DEFAULT_DIALOG_LABELS, title, ...normalized.labels };
     if (typeof document === 'undefined')
         throw new Error('The report editor requires a browser DOM.');
     const objectUrl = URL.createObjectURL(screenshot);
@@ -68,7 +71,46 @@ export async function openReportDialog(
         throw new Error('The report editor could not be initialized.');
     }
     titleElement.id = titleId;
-    titleElement.textContent = title;
+    titleElement.textContent = labels.title;
+    const textLabels: Partial<Record<keyof DialogLabels, string>> = {
+        instructions: 'p',
+        comment: '[data-label="comment"]',
+        clear: '[data-action="clear"]',
+        cancel: '.actions [value="cancel"]',
+        submit: '[value="confirm"]',
+    };
+    const accessibleLabels: Partial<Record<keyof DialogLabels, string>> = {
+        close: '.dialog-close',
+        annotationTools: '[role="toolbar"]',
+        drawingTools: '.toolbar-group:nth-child(1)',
+        annotationOptions: '.toolbar-group:nth-child(2)',
+        screenshotView: '.toolbar-group:last-child',
+        pencil: '[data-tool="pencil"]',
+        rectangle: '[data-tool="rectangle"]',
+        select: '[data-tool="select"]',
+        eraser: '[data-tool="eraser"]',
+        annotationColor: '.annotation-color, .annotation-color input',
+        fit: '[data-action="fit"]',
+        zoomIn: '[data-action="zoom-in"]',
+        zoomOut: '[data-action="zoom-out"]',
+        canvas: 'canvas',
+        maximize: '[data-action="maximize"]',
+    };
+    for (const [key, selector] of Object.entries(textLabels)) {
+        const element = dialog.querySelector(selector);
+        if (element !== null) element.textContent = labels[key as keyof DialogLabels];
+    }
+    for (const [key, selector] of Object.entries(accessibleLabels)) {
+        for (const element of dialog.querySelectorAll(selector)) {
+            element.setAttribute('aria-label', labels[key as keyof DialogLabels]);
+            element.setAttribute('title', labels[key as keyof DialogLabels]);
+        }
+    }
+    const colorLabel = dialog.querySelector('.annotation-color span');
+    if (colorLabel !== null) colorLabel.textContent = labels.annotationColor;
+    const submitColor = normalized.appearance.submitButtonColor ?? '#556b2f';
+    dialog.style.setProperty('--bugpack-submit-color', submitColor);
+    dialog.style.setProperty('--bugpack-submit-text', buttonTextColor(submitColor));
     const style = document.createElement('style');
     style.dataset.bugpackUi = '';
     style.textContent = dialogStyles;
@@ -78,6 +120,7 @@ export async function openReportDialog(
         URL.revokeObjectURL(objectUrl);
         throw new Error('The report editor could not be initialized.');
     }
+    canvas.style.marginInline = 'auto';
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
     const context = canvas.getContext('2d');
@@ -86,8 +129,17 @@ export async function openReportDialog(
         throw new Error('Canvas drawing is not supported by this browser.');
     }
     const canvasWrap = dialog.querySelector<HTMLDivElement>('.canvas-wrap');
+    let scrollEndTimer: number | undefined;
+    canvasWrap?.addEventListener('scroll', () => {
+        canvasWrap.classList.add('is-scrolling');
+        if (scrollEndTimer !== undefined) window.clearTimeout(scrollEndTimer);
+        scrollEndTimer = window.setTimeout(() => {
+            canvasWrap.classList.remove('is-scrolling');
+            scrollEndTimer = undefined;
+        }, 700);
+    });
     const editor = createAnnotationEditor(canvas, context, image, canvasWrap ?? undefined);
-    const fitScale = Math.min(
+    let fitScale = Math.min(
         1,
         Math.min(DIALOG_CONTENT_MAX_WIDTH, window.innerWidth - 72) / image.naturalWidth,
         (window.innerHeight * 0.55) / image.naturalHeight,
@@ -102,6 +154,26 @@ export async function openReportDialog(
         }
     };
     applyZoom();
+    const resize = (): void => {
+        const wasFit = zoom === fitScale;
+        const width =
+            canvasWrap?.clientWidth || Math.min(DIALOG_CONTENT_MAX_WIDTH, window.innerWidth - 72);
+        const height = canvasWrap?.clientHeight || window.innerHeight * 0.45;
+        fitScale = Math.max(
+            0.01,
+            Math.min(1, width / image.naturalWidth, height / image.naturalHeight),
+        );
+        zoom = wasFit ? fitScale : Math.max(fitScale, zoom);
+        applyZoom();
+    };
+    const maximizeButton = dialog.querySelector<HTMLButtonElement>('[data-action="maximize"]');
+    maximizeButton?.addEventListener('click', () => {
+        const maximized = dialog.classList.toggle('is-maximized');
+        maximizeButton.setAttribute('aria-pressed', String(maximized));
+        maximizeButton.setAttribute('aria-label', maximized ? labels.restore : labels.maximize);
+        maximizeButton.title = maximized ? labels.restore : labels.maximize;
+        resize();
+    });
     const toolButtons = dialog.querySelectorAll<HTMLButtonElement>('[data-tool]');
     const colorInput = dialog.querySelector<HTMLInputElement>('.annotation-color input');
     colorInput?.addEventListener('input', () => editor.setColor(colorInput.value));
@@ -117,9 +189,6 @@ export async function openReportDialog(
     dialog.querySelector('[data-action="clear"]')?.addEventListener('click', () => {
         editor.clear();
     });
-    dialog
-        .querySelector('[data-action="delete"]')
-        ?.addEventListener('click', () => editor.deleteSelected());
     dialog.querySelector('[data-action="fit"]')?.addEventListener('click', () => {
         zoom = fitScale;
         applyZoom();
@@ -135,6 +204,10 @@ export async function openReportDialog(
 
     document.head.append(style);
     (document.body ?? document.documentElement).append(dialog);
+    const resizeObserver =
+        typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(resize);
+    if (canvasWrap !== null) resizeObserver?.observe(canvasWrap);
+    window.addEventListener('resize', resize);
     try {
         return await new Promise<ReportDialogResult | undefined>((resolve, reject) => {
             const abort = () => {
@@ -166,6 +239,7 @@ export async function openReportDialog(
             }
             try {
                 dialog.showModal();
+                resize();
             } catch (error) {
                 signal.removeEventListener('abort', abort);
                 reject(
@@ -176,6 +250,9 @@ export async function openReportDialog(
             }
         });
     } finally {
+        if (scrollEndTimer !== undefined) window.clearTimeout(scrollEndTimer);
+        resizeObserver?.disconnect();
+        window.removeEventListener('resize', resize);
         editor.destroy();
         dialog.remove();
         style.remove();

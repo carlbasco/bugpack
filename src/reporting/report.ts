@@ -3,6 +3,7 @@ import type { PrivacyFilter } from '../privacy/privacy-filter.js';
 import { raceWithAbort, throwIfAborted } from '../shared/abort.js';
 import type { ConsoleLogRecord } from '../diagnostics/console/types.js';
 import type { NetworkLogRecord } from '../diagnostics/network/types.js';
+import type { JavascriptErrorRecord } from '../diagnostics/javascript-errors/types.js';
 import type { BrowserReport, DiagnosticReport, PageReport } from './types.js';
 
 function browserReport(): BrowserReport {
@@ -26,9 +27,9 @@ function pageReport(privacy: PrivacyFilter): PageReport {
     const blocked = url === undefined;
     return {
         url: url ?? '[BLOCKED]',
-        title: privacy.sanitizeText(document.title),
+        title: privacy.sanitizeBoundedText(document.title),
         referrer: document.referrer ? (privacy.sanitizeUrl(document.referrer) ?? '[BLOCKED]') : '',
-        route: blocked ? '[BLOCKED]' : privacy.sanitizeText(location.pathname),
+        route: blocked ? '[BLOCKED]' : privacy.sanitizeBoundedText(location.pathname),
     };
 }
 
@@ -37,16 +38,16 @@ export async function buildDiagnosticReport(
     privacy: PrivacyFilter,
     getConsoleLogs: () => ConsoleLogRecord[],
     getNetworkLogs: () => NetworkLogRecord[],
+    getJavascriptErrors: () => JavascriptErrorRecord[],
+    beforeSnapshot: () => Promise<void>,
     signal: AbortSignal,
 ): Promise<DiagnosticReport> {
-    const resolved = options.resolveMetadata
-        ? privacy.sanitizeObject(await raceWithAbort(options.resolveMetadata({ signal }), signal))
-        : {};
+    const metadata =
+        typeof options.metadata === 'function'
+            ? privacy.sanitizeObject(await raceWithAbort(options.metadata({ signal }), signal))
+            : options.metadata;
+    await beforeSnapshot();
     throwIfAborted(signal);
-    const metadata = privacy.sanitizeObject({
-        ...options.metadata,
-        ...resolved,
-    });
     return {
         formatVersion: 1,
         metadata,
@@ -54,6 +55,6 @@ export async function buildDiagnosticReport(
         page: pageReport(privacy),
         consoleLogs: getConsoleLogs(),
         networkLogs: getNetworkLogs(),
-        javascriptErrors: [],
+        javascriptErrors: getJavascriptErrors(),
     };
 }

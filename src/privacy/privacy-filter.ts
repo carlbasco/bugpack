@@ -15,7 +15,8 @@ const MAX_DIAGNOSTIC_DEPTH = 8;
 const MAX_DIAGNOSTIC_ARRAY_ITEMS = 100;
 const MAX_DIAGNOSTIC_OBJECT_KEYS = 100;
 const MAX_DIAGNOSTIC_STRING_LENGTH = 10_000;
-const ASSIGNED_VALUE_PATTERN = /\b([A-Za-z][\w-]*)["']?\s*[:=]\s*["']?[^\s,;&"']+/giu;
+const ASSIGNED_VALUE_PATTERN =
+    /\b([A-Za-z][\w-]*)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,;&\r\n}"']+)/giu;
 
 function normalizeSensitiveKey(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9]/gu, '');
@@ -86,8 +87,15 @@ export class PrivacyFilter {
 
     public sanitizeText(value: string): string {
         return value.replace(ASSIGNED_VALUE_PATTERN, (match, key: string) =>
-            this.sensitiveKeys.has(normalizeSensitiveKey(key)) ? `${key}=[REDACTED]` : match,
+            this.sensitiveKeys.has(normalizeSensitiveKey(key))
+                ? `${key}=[REDACTED]`
+                : key + this.sanitizeText(match.slice(key.length)),
         );
+    }
+
+    public sanitizeBoundedText(value: string): string {
+        const sanitized = this.sanitize(value);
+        return typeof sanitized === 'string' ? sanitized : '[Unserializable]';
     }
 
     public sanitizeObject(value: unknown): JsonObject {
@@ -130,7 +138,7 @@ export class PrivacyFilter {
             ) {
                 continue;
             }
-            sanitized[name] = this.sanitizeText(value);
+            sanitized[name] = this.sanitizeBoundedText(value);
         }
         return Object.keys(sanitized).length === 0 ? undefined : sanitized;
     }
@@ -160,8 +168,8 @@ export class PrivacyFilter {
         if (value instanceof Date) return value.toISOString();
         if (value instanceof Error) {
             return {
-                name: value.name,
-                message: this.sanitizeText(value.message),
+                name: this.sanitizeValue(value.name, seen, depth + 1, bounded),
+                message: this.sanitizeValue(value.message, seen, depth + 1, bounded),
             };
         }
         if (typeof value !== 'object') return '[Unsupported value]';
@@ -190,7 +198,7 @@ export class PrivacyFilter {
                 return result;
             }
 
-            const result: JsonObject = {};
+            const result: JsonObject = Object.create(null) as JsonObject;
             let captured = 0;
             let truncated = false;
             const descriptors = Object.getOwnPropertyDescriptors(value);

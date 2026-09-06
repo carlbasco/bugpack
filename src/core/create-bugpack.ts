@@ -1,17 +1,18 @@
 import { ConsoleCollector } from '../diagnostics/console/console-collector.js';
 import { NetworkCollector } from '../diagnostics/network/network-collector.js';
+import { JavascriptErrorCollector } from '../diagnostics/javascript-errors/javascript-error-collector.js';
 import { capturePage } from '../reporting/capture.js';
 import { createZipOutput } from '../reporting/output.js';
 import { buildDiagnosticReport } from '../reporting/report.js';
 import { PrivacyFilter } from '../privacy/privacy-filter.js';
 import { CircularBuffer } from '../shared/circular-buffer.js';
 import { throwIfAborted } from '../shared/abort.js';
-import { FloatingButton } from '../ui/floating-button.js';
 import { openReportDialog } from '../ui/report-dialog.js';
 import { normalizeOptions } from './config.js';
 import type { BugPack, BugPackOptions, ObjectBugPackOptions, ZipBugPackOptions } from './types.js';
 import type { ConsoleLogRecord } from '../diagnostics/console/types.js';
 import type { NetworkLogRecord } from '../diagnostics/network/types.js';
+import type { JavascriptErrorRecord } from '../diagnostics/javascript-errors/types.js';
 import type { BugPackObjectReport } from '../reporting/types.js';
 
 export function createBugPack(options: ZipBugPackOptions): BugPack;
@@ -24,7 +25,9 @@ export function createBugPack(options: BugPackOptions): BugPack {
         normalized.privacy.blockUrls,
         normalized.privacy.blockNetworkHeaders,
     );
-    normalized.metadata = privacy.sanitizeObject(normalized.metadata);
+    if (typeof normalized.metadata !== 'function') {
+        normalized.metadata = privacy.sanitizeObject(normalized.metadata);
+    }
 
     const consoleLogs = new CircularBuffer<ConsoleLogRecord>(
         normalized.diagnostics.console.maxEntries,
@@ -32,54 +35,66 @@ export function createBugPack(options: BugPackOptions): BugPack {
     const networkLogs = new CircularBuffer<NetworkLogRecord>(
         normalized.diagnostics.network.maxRequests,
     );
-    const consoleCollector = new ConsoleCollector(consoleLogs, privacy);
+    const javascriptErrors = new CircularBuffer<JavascriptErrorRecord>(
+        normalized.diagnostics.javascriptErrors.maxEntries,
+    );
+    const consoleCollector = new ConsoleCollector(
+        consoleLogs,
+        privacy,
+        normalized.diagnostics.console.levels,
+    );
     const networkCollector = new NetworkCollector(
         normalized.diagnostics.network.capture,
         networkLogs,
         privacy,
+        normalized.diagnostics.network.statuses,
+    );
+    const javascriptErrorCollector = new JavascriptErrorCollector(
+        javascriptErrors,
+        privacy,
+        normalized.diagnostics.javascriptErrors.types,
     );
     let enabled = false;
     let disposed = false;
     let activeReport: AbortController | undefined;
 
     const stopRuntime = (): void => {
-        const errors: unknown[] = [];
         for (const stop of [
-            () => floatingButton.unmount(),
+            () => javascriptErrorCollector.disable(),
             () => networkCollector.disable(),
             () => consoleCollector.disable(),
         ]) {
             try {
                 stop();
-            } catch (error) {
-                errors.push(error);
+            } catch {
+                // Teardown must remain safe even when a host browser API was overridden.
             }
         }
-        if (errors.length > 0) throw new AggregateError(errors, 'BugPack cleanup failed.');
     };
 
-    const report = async (): Promise<void> => {
-        if (disposed) throw new Error('This BugPack instance has been disposed.');
-        if (activeReport !== undefined) throw new Error('A BugPack report is already in progress.');
+    const runReport = async (): Promise<void> => {
+        if (disposed || activeReport !== undefined) return;
         const controller = new AbortController();
         activeReport = controller;
         try {
-            await networkCollector.waitForResponseBodies(controller.signal);
             const diagnosticReport = await buildDiagnosticReport(
                 normalized,
                 privacy,
                 () => consoleLogs.snapshot(),
                 () => networkCollector.snapshot(),
+                () => javascriptErrors.snapshot(),
+                () => networkCollector.waitForResponseBodies(controller.signal),
                 controller.signal,
             );
             const screenshot = await capturePage(
-                normalized.privacy.maskTextSelectors,
+                normalized.privacy.maskElementSelectors,
                 controller.signal,
             );
             const result = await openReportDialog(
                 screenshot,
                 controller.signal,
                 normalized.reportButtonText,
+                normalized.dialog,
             );
             if (result === undefined) return;
             throwIfAborted(controller.signal);
@@ -100,16 +115,21 @@ export function createBugPack(options: BugPackOptions): BugPack {
                 throwIfAborted(controller.signal);
                 await normalized.onSubmit(objectReport);
             }
+        } catch (error) {
+            if (!controller.signal.aborted) throw error;
         } finally {
             if (activeReport === controller) activeReport = undefined;
         }
     };
 
-    const floatingButton = new FloatingButton(
-        normalized.floatingButton.position,
-        normalized.reportButtonText,
-        report,
-    );
+    const logReportFailure = (): void => {
+        try {
+            // Do not expose potentially sensitive resolver or submission errors.
+            console.error('BugPack could not generate or submit the report. Please try again.');
+        } catch {
+            // A host console override must not break the application.
+        }
+    };
 
     return {
         enable(): void {
@@ -118,7 +138,9 @@ export function createBugPack(options: BugPackOptions): BugPack {
             try {
                 if (normalized.diagnostics.console.enabled) consoleCollector.enable();
                 if (normalized.diagnostics.network.enabled) networkCollector.enable();
-                if (normalized.floatingButton.enabled) floatingButton.mount();
+                if (normalized.diagnostics.javascriptErrors.enabled) {
+                    javascriptErrorCollector.enable();
+                }
                 enabled = true;
             } catch (error) {
                 try {
@@ -146,8 +168,11 @@ export function createBugPack(options: BugPackOptions): BugPack {
             } finally {
                 consoleLogs.clear();
                 networkLogs.clear();
+                javascriptErrors.clear();
             }
         },
-        report,
+        report(): void {
+            void runReport().catch(logReportFailure);
+        },
     };
 }

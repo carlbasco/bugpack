@@ -16,6 +16,7 @@ dialog[data-bugpack-ui] form {
     padding: 20px;
 }
 dialog[data-bugpack-ui] h2 {
+    flex: 1;
     margin: 0;
     font-size: 22px;
 }
@@ -36,6 +37,37 @@ dialog[data-bugpack-ui] .dialog-close {
     justify-content: center;
     border-color: transparent;
     color: #525252;
+}
+dialog[data-bugpack-ui] .dialog-maximize {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+    padding: 7px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border-color: transparent;
+    color: #525252;
+}
+dialog[data-bugpack-ui] .dialog-maximize:hover {
+    background: #f5f5f5;
+    color: #171717;
+}
+dialog[data-bugpack-ui] .dialog-maximize svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+dialog[data-bugpack-ui] .dialog-maximize .maximize-icon-restore,
+dialog[data-bugpack-ui] .dialog-maximize[aria-pressed='true'] .maximize-icon-expand {
+    display: none;
+}
+dialog[data-bugpack-ui] .dialog-maximize[aria-pressed='true'] .maximize-icon-restore {
+    display: block;
 }
 dialog[data-bugpack-ui] .dialog-close:hover {
     background: #f5f5f5;
@@ -115,17 +147,28 @@ dialog[data-bugpack-ui] .annotation-color input {
     cursor: pointer;
 }
 dialog[data-bugpack-ui] .canvas-wrap {
-    display: inline-block;
+    display: block;
+    width: 100%;
+    height: 45vh;
+    min-height: 100px;
     max-width: 100%;
     max-height: 55vh;
-    overflow: hidden;
+    overflow: scroll;
+    scrollbar-gutter: stable;
+    scrollbar-width: none;
+}
+dialog[data-bugpack-ui] .canvas-wrap.is-scrolling {
     scrollbar-color: #a3a3a3 transparent;
     scrollbar-width: thin;
 }
 dialog[data-bugpack-ui] .canvas-wrap.is-zoomed {
-    overflow: auto;
+    overflow: scroll;
 }
 dialog[data-bugpack-ui] .canvas-wrap::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+dialog[data-bugpack-ui] .canvas-wrap.is-scrolling::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
@@ -170,14 +213,38 @@ dialog[data-bugpack-ui] button {
     cursor: pointer;
 }
 dialog[data-bugpack-ui] button.primary {
-    border-color: #5b21b6;
-    background: #5b21b6;
-    color: white;
+    border-color: var(--bugpack-submit-color, #556b2f);
+    background: var(--bugpack-submit-color, #556b2f);
+    color: var(--bugpack-submit-text, white);
+}
+
+dialog[data-bugpack-ui] button.primary:hover {
+    box-shadow: inset 0 0 0 999px rgb(127 127 127 / 12%);
+}
+
+dialog[data-bugpack-ui].is-maximized {
+    width: calc(100vw - 16px);
+    max-width: none;
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+}
+
+dialog[data-bugpack-ui].is-maximized form {
+    box-sizing: border-box;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+dialog[data-bugpack-ui].is-maximized .canvas-wrap {
+    flex: 1 0 100px;
+    height: 0;
+    max-height: none;
 }
 dialog[data-bugpack-ui] .annotation-toolbar button[aria-pressed='true'] {
-    border-color: #5b21b6;
-    background: #ede9fe;
-    color: #4c1d95;
+    border-color: #556b2f;
+    background: #eef2e3;
+    color: #33431d;
     font-weight: 700;
 }
 @media (max-width: 620px) {

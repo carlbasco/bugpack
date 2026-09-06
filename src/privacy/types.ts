@@ -1,6 +1,6 @@
 export interface PrivacyOptions {
     sensitiveKeys?: string[];
-    maskTextSelectors?: string[];
+    maskElementSelectors?: string[];
     blockNetworkHeaders?: string[];
     blockUrls?: string[];
 }

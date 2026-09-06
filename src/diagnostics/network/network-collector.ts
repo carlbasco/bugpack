@@ -1,4 +1,4 @@
-import type { NetworkCapture, NetworkLogRecord } from './types.js';
+import type { NetworkCapture, NetworkLogRecord, NetworkStatusGroup } from './types.js';
 import type { PrivacyFilter } from '../../privacy/privacy-filter.js';
 import { raceWithAbort } from '../../shared/abort.js';
 import type { CircularBuffer } from '../../shared/circular-buffer.js';
@@ -474,6 +474,7 @@ export class NetworkCollector {
         private readonly capture: NetworkCapture[],
         private readonly buffer: CircularBuffer<NetworkLogRecord>,
         private readonly privacy: PrivacyFilter,
+        private readonly statuses?: NetworkStatusGroup[],
     ) {}
 
     public enable(): void {
@@ -494,9 +495,10 @@ export class NetworkCollector {
                     ...(responseHeaders === undefined ? {} : { responseHeaders }),
                     ...(responseBody === undefined
                         ? {}
-                        : { responseBody: this.privacy.sanitizeText(responseBody) }),
+                        : { responseBody: this.privacy.sanitizeBoundedText(responseBody) }),
                 };
-                this.buffer.push(retained);
+                let retainedInBuffer = this.statuses === undefined;
+                if (retainedInBuffer) this.buffer.push(retained);
                 if (retained.result === 'PENDING') {
                     this.pendingStarts.set(retained, startedAt);
                 }
@@ -508,6 +510,16 @@ export class NetworkCollector {
                             ...networkPatch
                         } = patch;
                         Object.assign(retained, networkPatch);
+                        if (
+                            !retainedInBuffer &&
+                            retained.responseStatus !== undefined &&
+                            this.statuses?.includes(
+                                `${Math.floor(retained.responseStatus / 100)}xx` as NetworkStatusGroup,
+                            )
+                        ) {
+                            this.buffer.push(retained);
+                            retainedInBuffer = true;
+                        }
                         if (retained.result === 'PENDING') {
                             this.pendingStarts.set(retained, startedAt);
                         } else this.pendingStarts.delete(retained);
@@ -517,11 +529,12 @@ export class NetworkCollector {
                             else retained.responseHeaders = responseHeaders;
                         }
                         if (rawBody !== undefined) {
-                            retained.responseBody = this.privacy.sanitizeText(rawBody);
+                            retained.responseBody = this.privacy.sanitizeBoundedText(rawBody);
                         }
                     },
                     trackResponseBodyRead: (read) => this.trackResponseBodyRead(read),
                     canTrackResponseBodyRead: () =>
+                        retainedInBuffer &&
                         this.pendingResponseBodyReads.size < MAX_TRACKED_RESPONSE_BODY_READS,
                 };
             }

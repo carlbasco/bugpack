@@ -15,6 +15,7 @@ describe('public output types', () => {
                 expectTypeOf(archive).toEqualTypeOf<Blob>();
             },
         });
+        expectTypeOf(objectBugPack.report).returns.toBeVoid();
         objectBugPack.dispose();
         zipBugPack.dispose();
     });
@@ -22,5 +23,12 @@ describe('public output types', () => {
     it('accepts options composed as the public union type', () => {
         const createFromUnion = (options: BugPackOptions): BugPack => createBugPack(options);
         expectTypeOf(createFromUnion).toEqualTypeOf<(options: BugPackOptions) => BugPack>();
+    });
+
+    it('accepts static, synchronous, and asynchronous metadata', () => {
+        const onSubmit = () => undefined;
+        createBugPack({ metadata: { source: 'static' }, onSubmit }).dispose();
+        createBugPack({ metadata: () => ({ source: 'sync' }), onSubmit }).dispose();
+        createBugPack({ metadata: () => Promise.resolve({ source: 'async' }), onSubmit }).dispose();
     });
 });

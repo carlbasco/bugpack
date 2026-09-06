@@ -4,7 +4,7 @@ import { openReportDialog } from '../src/ui/report-dialog.js';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('report dialog image loading', () => {
-    it('submits the annotated canvas and comment, then removes temporary resources', async () => {
+    it.each([false, true])('submits and cleans up with custom labels: %s', async (custom) => {
         class LoadedImage {
             public naturalWidth = 640;
             public naturalHeight = 360;
@@ -58,7 +58,23 @@ describe('report dialog image loading', () => {
             this.dispatchEvent(new Event('close'));
         });
 
-        const flow = openReportDialog(new Blob(), new AbortController().signal);
+        const flow = openReportDialog(
+            new Blob(),
+            new AbortController().signal,
+            'Report a bug',
+            custom
+                ? {
+                      labels: {
+                          title: '<b>Informe</b>',
+                          submit: 'Enviar',
+                          maximize: 'Ampliar',
+                          restore: 'Restaurar',
+                          eraser: 'Borrar',
+                      },
+                      appearance: { submitButtonColor: '#ffffff' },
+                  }
+                : {},
+        );
         await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
         const dialog = document.querySelector('dialog');
         const textarea = dialog?.querySelector<HTMLTextAreaElement>('textarea') ?? null;
@@ -66,6 +82,25 @@ describe('report dialog image loading', () => {
         expect(dialog.querySelector('.dialog-header h2')).not.toBeNull();
         expect(dialog.querySelector<HTMLButtonElement>('.dialog-close')?.value).toBe('cancel');
         expect(dialog.querySelectorAll('.toolbar-group')).toHaveLength(3);
+        expect(dialog.querySelector('[data-tool="eraser"]')?.getAttribute('aria-label')).toBe(
+            custom ? 'Borrar' : 'Erase annotation',
+        );
+        expect(dialog.querySelector('[data-tool="pencil"]')?.getAttribute('aria-label')).toBe(
+            'Pencil',
+        );
+        expect(dialog.style.getPropertyValue('--bugpack-submit-text')).toBe(
+            custom ? '#000000' : '#ffffff',
+        );
+        const maximize = dialog.querySelector<HTMLButtonElement>('[data-action="maximize"]');
+        expect(maximize?.querySelector('rect.maximize-icon-expand')).not.toBeNull();
+        expect(maximize?.querySelector('.maximize-icon-restore')).not.toBeNull();
+        maximize?.click();
+        expect(dialog.classList.contains('is-maximized')).toBe(true);
+        expect(maximize?.getAttribute('aria-label')).toBe(custom ? 'Restaurar' : 'Restore dialog');
+        expect(dialog.querySelector<HTMLCanvasElement>('canvas')?.style.marginInline).toBe('auto');
+        maximize?.click();
+        expect(dialog.classList.contains('is-maximized')).toBe(false);
+        expect(maximize?.getAttribute('aria-label')).toBe(custom ? 'Ampliar' : 'Maximize dialog');
         for (const tool of ['pencil', 'rectangle']) {
             const button = dialog.querySelector(`[data-tool="${tool}"]`);
             expect(button?.querySelector('svg')).not.toBeNull();
@@ -76,6 +111,18 @@ describe('report dialog image loading', () => {
         }
         const canvasWrap = dialog.querySelector('.canvas-wrap');
         if (canvasWrap === null) throw new Error('Annotation canvas did not mount.');
+        canvasWrap.dispatchEvent(new Event('scroll'));
+        expect(canvasWrap.classList.contains('is-scrolling')).toBe(true);
+        let viewportWidth = 320;
+        Object.defineProperties(canvasWrap, {
+            clientWidth: { configurable: true, get: () => viewportWidth },
+            clientHeight: { configurable: true, value: 180 },
+        });
+        window.dispatchEvent(new Event('resize'));
+        expect(dialog.querySelector('canvas')?.style.width).toBe('320px');
+        viewportWidth = 160;
+        window.dispatchEvent(new Event('resize'));
+        expect(dialog.querySelector('canvas')?.style.width).toBe('160px');
         expect(canvasWrap.classList.contains('is-zoomed')).toBe(false);
         dialog.querySelector<HTMLButtonElement>('[data-action="zoom-in"]')?.click();
         expect(canvasWrap.classList.contains('is-zoomed')).toBe(true);
@@ -88,9 +135,12 @@ describe('report dialog image loading', () => {
         colorInput.value = '#2563eb';
         colorInput.dispatchEvent(new Event('input'));
         expect(dialog.querySelector<HTMLButtonElement>('[value="confirm"]')?.textContent).toBe(
-            'Generate Report',
+            custom ? 'Enviar' : 'Generate Report',
         );
-        expect(dialog.querySelector('h2')?.textContent).toBe('Report a bug');
+        expect(dialog.querySelector('h2')?.textContent).toBe(
+            custom ? '<b>Informe</b>' : 'Report a bug',
+        );
+        expect(dialog.querySelector('h2 b')).toBeNull();
         textarea.value = '  Reproducible on checkout  ';
         dialog.close('confirm');
 

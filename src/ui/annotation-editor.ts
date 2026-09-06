@@ -1,4 +1,4 @@
-export type AnnotationTool = 'pencil' | 'rectangle' | 'select';
+import type { AnnotationEditor, AnnotationTool } from './types.js';
 
 interface Point {
     x: number;
@@ -46,28 +46,24 @@ type Interaction =
           opposite: Point;
       };
 
-export interface AnnotationEditor {
-    clear(): void;
-    deleteSelected(): void;
-    destroy(): void;
-    prepareExport(): void;
-    setColor(color: string): void;
-    setTool(tool: AnnotationTool): void;
-}
-
 const DEFAULT_ANNOTATION_COLOR = '#ef4444';
-const SELECTION_COLOR = '#5b21b6';
+const SELECTION_COLOR = '#556b2f';
 const HEX_COLOR = /^#[\da-f]{6}$/iu;
 const MAX_PENCIL_POINTS = 10_000;
 
-function drawCursor(): string {
-    return `url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%226%22 fill=%22none%22 stroke=%22black%22 stroke-width=%222%22/%3E%3Cpath d=%22M12 2v20M2 12h20%22 stroke=%22black%22 stroke-width=%222%22/%3E%3C/svg%3E") 12 12, crosshair`;
+function drawCursor(tool: AnnotationTool = 'pencil'): string {
+    // White outlines keep the original Paint-inspired artwork visible on dark screenshots.
+    const artwork =
+        tool === 'rectangle'
+            ? '<path d="M12 3v18M3 12h18" stroke="white" stroke-width="3"/><path d="M12 3v18M3 12h18" stroke="black" stroke-width="1"/>'
+            : '<path d="m3 21 2-7L16 3l5 5-11 11-7 2Z" fill="white" stroke="white" stroke-width="3" stroke-linejoin="round"/><path d="m3 21 2-7L16 3l5 5-11 11-7 2Z" fill="white" stroke="black" stroke-width="1" stroke-linejoin="round"/><path d="m5 14 5 5M14 5l5 5M7 16l9-9" fill="none" stroke="black"/><path d="m3 21 1-4 3 3Z" fill="black"/>';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">${artwork}</svg>`;
+    const hotspot = tool === 'rectangle' ? '12 12' : '3 21';
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
 }
 
-function selectCursor(isDragging = false): string {
-    const fill = isDragging ? '%23dbeafe' : 'white';
-    const fallback = isDragging ? 'grabbing' : 'grab';
-    return `url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M4 2 20 11l-7 2-3 7L4 2Z%22 fill=%22${fill}%22 stroke=%22black%22 stroke-linejoin=%22round%22 stroke-width=%222%22/%3E%3C/svg%3E") 5 3, ${fallback}`;
+function eraserCursor(): string {
+    return 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22%3E%3Cpath d=%22m3 15 10-12 8 7-10 12H9Z%22 fill=%22white%22 stroke=%22black%22 stroke-width=%222%22/%3E%3Cpath d=%22m7 10 8 7%22 stroke=%22black%22/%3E%3C/svg%3E") 3 15, crosshair';
 }
 
 function bounds(shape: RectangleAnnotation): RectangleAnnotation {
@@ -199,6 +195,7 @@ export function createAnnotationEditor(
         context.strokeRect(rectangle.x, rectangle.y, rectangle.width, rectangle.height);
         context.setLineDash([]);
         context.fillStyle = '#ffffff';
+        if (tool === 'eraser') return;
         for (const handle of Object.values(handles(selected))) {
             context.fillRect(
                 handle.x - handleSize / 2,
@@ -262,7 +259,10 @@ export function createAnnotationEditor(
     };
 
     const containsPencil = (annotation: PencilAnnotation, point: Point): boolean => {
-        const hitRadius = Math.max(8, lineWidth * 2);
+        const hitRadius = Math.max(
+            lineWidth / 2,
+            (8 * canvas.width) / (canvas.getBoundingClientRect().width || canvas.width),
+        );
         const [first, ...remaining] = annotation.points;
         if (first === undefined) return false;
         if (remaining.length === 0)
@@ -282,12 +282,33 @@ export function createAnnotationEditor(
             if (annotation === undefined) continue;
             if (
                 (annotation.type === 'pencil' && containsPencil(annotation, point)) ||
-                (annotation.type !== 'pencil' && contains(annotation, point))
+                (annotation.type !== 'pencil' &&
+                    (tool === 'eraser'
+                        ? nearBorder(annotation, point)
+                        : contains(annotation, point)))
             ) {
                 return index;
             }
         }
         return undefined;
+    };
+
+    const nearBorder = (annotation: RectangleAnnotation, point: Point): boolean => {
+        const corners = Object.values(handles(annotation));
+        const [nw, ne, sw, se] = corners as [Point, Point, Point, Point];
+        const radius = Math.max(
+            lineWidth / 2,
+            (8 * canvas.width) / (canvas.getBoundingClientRect().width || canvas.width),
+        );
+        return [
+            [nw, ne],
+            [ne, se],
+            [se, sw],
+            [sw, nw],
+        ].some(
+            ([a, b]) =>
+                a !== undefined && b !== undefined && distanceToSegment(point, a, b) <= radius,
+        );
     };
 
     const oppositeFor = (shape: RectangleAnnotation, handle: Handle): Point => {
@@ -339,6 +360,15 @@ export function createAnnotationEditor(
             canvas.focus();
             canvas.setPointerCapture?.(event.pointerId);
 
+            if (tool === 'eraser') {
+                const index = annotationAt(point);
+                if (index !== undefined) annotations.splice(index, 1);
+                selectedIndex = undefined;
+                interaction = undefined;
+                render();
+                return;
+            }
+
             if (tool === 'select') {
                 const selected =
                     selectedIndex === undefined ? undefined : annotations[selectedIndex];
@@ -358,6 +388,7 @@ export function createAnnotationEditor(
                 const annotation =
                     selectedIndex === undefined ? undefined : annotations[selectedIndex];
                 if (annotation !== undefined && annotation.type !== 'pencil') {
+                    canvas.style.cursor = 'move';
                     interaction = {
                         type: 'move',
                         index: selectedIndex as number,
@@ -377,7 +408,7 @@ export function createAnnotationEditor(
                         scrollLeft: scrollContainer.scrollLeft,
                         scrollTop: scrollContainer.scrollTop,
                     };
-                    canvas.style.cursor = selectCursor(true);
+                    canvas.style.cursor = 'move';
                 } else {
                     interaction = undefined;
                 }
@@ -408,7 +439,28 @@ export function createAnnotationEditor(
     canvas.addEventListener(
         'pointermove',
         (event) => {
-            if (interaction === undefined) return;
+            if (interaction === undefined) {
+                const point = pointFromEvent(event);
+                if (tool === 'eraser') {
+                    const next = annotationAt(point);
+                    if (next !== selectedIndex) {
+                        selectedIndex = next;
+                        render();
+                    }
+                } else if (tool === 'select') {
+                    const selected =
+                        selectedIndex === undefined ? undefined : annotations[selectedIndex];
+                    const handle =
+                        selected?.type === 'rectangle' ? hitHandle(selected, point) : undefined;
+                    canvas.style.cursor =
+                        handle === undefined
+                            ? 'default'
+                            : handle === 'north-west' || handle === 'south-east'
+                              ? 'nwse-resize'
+                              : 'nesw-resize';
+                }
+                return;
+            }
             if (interaction.type === 'pan') {
                 if (scrollContainer !== undefined) {
                     scrollContainer.scrollLeft =
@@ -463,19 +515,29 @@ export function createAnnotationEditor(
     );
 
     const finishInteraction = (): void => {
-        if (interaction?.type === 'shape') {
+        if (interaction?.type === 'shape' || interaction?.type === 'resize') {
             const annotation = annotations[interaction.index];
             if (annotation !== undefined && annotation.type !== 'pencil') {
                 annotations[interaction.index] = bounds(annotation);
             }
         }
         interaction = undefined;
-        if (tool === 'select') canvas.style.cursor = selectCursor();
+        if (tool === 'select') canvas.style.cursor = 'default';
         render();
     };
     canvas.addEventListener('pointerup', finishInteraction, listenerOptions);
     canvas.addEventListener('pointercancel', finishInteraction, listenerOptions);
     canvas.addEventListener('lostpointercapture', finishInteraction, listenerOptions);
+    canvas.addEventListener(
+        'pointerleave',
+        () => {
+            if (tool === 'eraser') {
+                selectedIndex = undefined;
+                render();
+            }
+        },
+        listenerOptions,
+    );
     canvas.addEventListener(
         'keydown',
         (event) => {
@@ -528,13 +590,18 @@ export function createAnnotationEditor(
                 throw new TypeError('Annotation color must be a six-digit hexadecimal color.');
             }
             color = nextColor;
-            if (tool !== 'select') canvas.style.cursor = drawCursor();
+            if (tool !== 'select' && tool !== 'eraser') canvas.style.cursor = drawCursor(tool);
         },
         setTool(nextTool): void {
             tool = nextTool;
             interaction = undefined;
             if (tool !== 'select') selectedIndex = undefined;
-            canvas.style.cursor = tool === 'select' ? selectCursor() : drawCursor();
+            canvas.style.cursor =
+                tool === 'select'
+                    ? 'default'
+                    : tool === 'eraser'
+                      ? eraserCursor()
+                      : drawCursor(tool);
             render();
         },
     };

@@ -13,11 +13,13 @@ vi.mock('../src/reporting/capture.js', async (importOriginal) => ({
 vi.mock('../src/ui/report-dialog.js', () => ({ openReportDialog: mocks.openReportDialog }));
 
 import { createBugPack } from '../src/index.js';
+import { NetworkCollector } from '../src/diagnostics/network/network-collector.js';
 import type { BugPackObjectReport } from '../src/index.js';
 
 const PNG = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
 
 beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mocks.capturePage.mockReset().mockResolvedValue(PNG);
     mocks.openReportDialog.mockReset().mockResolvedValue({
         annotatedScreenshot: PNG,
@@ -28,19 +30,54 @@ beforeEach(() => {
 });
 
 describe('report flow', () => {
-    it('merges current metadata and submits object output', async () => {
+    it('can be bound directly to a button', async () => {
         const onSubmit = vi.fn();
+        const bugpack = createBugPack({ onSubmit });
+        const button = document.createElement('button');
+        // report handles every rejection internally; exercise direct DOM binding.
+        button.addEventListener('click', bugpack.report);
+        button.click();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+        bugpack.dispose();
+    });
+
+    it('handles capture failure and allows a retry', async () => {
+        mocks.capturePage.mockRejectedValueOnce(new Error('password=secret'));
+        const onSubmit = vi.fn();
+        const bugpack = createBugPack({ onSubmit });
+        expect(bugpack.report()).toBeUndefined();
+        await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
+        expect(onSubmit).not.toHaveBeenCalled();
+        expect(console.error).toHaveBeenCalledWith(
+            'BugPack could not generate or submit the report. Please try again.',
+        );
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    });
+
+    it('handles submission failure even when the host console throws', async () => {
+        vi.mocked(console.error).mockImplementation(() => {
+            throw new Error('console failed');
+        });
+        const onSubmit = vi.fn(() => Promise.reject(new Error('submission failed')));
+        const bugpack = createBugPack({ onSubmit });
+        expect(bugpack.report()).toBeUndefined();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    });
+
+    it('resolves current metadata and submits object output', async () => {
+        const onSubmit = vi.fn();
+        let release = 'old';
         const bugpack = createBugPack({
-            metadata: { application: 'portal', release: 'old' },
-            resolveMetadata: ({ signal }) => {
+            metadata: ({ signal }) => {
                 expect(signal.aborted).toBe(false);
-                return { release: 'new' };
+                return { application: 'portal', release };
             },
-            floatingButton: { enabled: false },
             onSubmit,
         });
-        await bugpack.report();
-        expect(onSubmit).toHaveBeenCalledOnce();
+        release = 'new';
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
         const submitted = onSubmit.mock.calls[0]?.[0] as BugPackObjectReport;
         expect(submitted).toMatchObject({
             formatVersion: 1,
@@ -57,11 +94,11 @@ describe('report flow', () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
             privacy: { blockUrls: ['/billing'] },
-            floatingButton: { enabled: false },
             onSubmit,
         });
 
-        await bugpack.report();
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
 
         expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
             page: { url: '[BLOCKED]', route: '[BLOCKED]' },
@@ -73,13 +110,13 @@ describe('report flow', () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
             diagnostics: { console: { enabled: true, maxEntries: 1 } },
-            floatingButton: { enabled: false },
             onSubmit,
         });
         bugpack.enable();
         console.error('discarded');
         console.error({ password: 'secret', message: 'token=also-secret' });
-        await bugpack.report();
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
         expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
             consoleLogs: [
                 {
@@ -96,18 +133,72 @@ describe('report flow', () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
             diagnostics: { console: { enabled: true } },
-            resolveMetadata: () => {
+            metadata: () => {
                 console.error('recorded during metadata resolution');
                 return {};
             },
-            floatingButton: { enabled: false },
             onSubmit,
         });
         bugpack.enable();
-        await bugpack.report();
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
         expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
             consoleLogs: [{ arguments: ['recorded during metadata resolution'] }],
         });
+        bugpack.dispose();
+    });
+
+    it('waits for response-body capture after current metadata resolves', async () => {
+        const order: string[] = [];
+        const wait = vi
+            .spyOn(NetworkCollector.prototype, 'waitForResponseBodies')
+            .mockImplementation(() => {
+                order.push('wait');
+                return Promise.resolve();
+            });
+        const onSubmit = vi.fn();
+        const bugpack = createBugPack({
+            metadata: () => {
+                order.push('metadata');
+                return {};
+            },
+            onSubmit,
+        });
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+        expect(order).toEqual(['metadata', 'wait']);
+        wait.mockRestore();
+    });
+
+    it('captures JavaScript errors when explicitly enabled', async () => {
+        const onSubmit = vi.fn();
+        const bugpack = createBugPack({
+            diagnostics: { javascriptErrors: { enabled: true } },
+            onSubmit,
+        });
+        bugpack.enable();
+        window.dispatchEvent(
+            new ErrorEvent('error', {
+                message: 'uncaught token=secret',
+                error: new Error('uncaught token=secret'),
+            }),
+        );
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+        expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+            javascriptErrors: [{ type: 'error', message: 'uncaught token=[REDACTED]' }],
+        });
+        bugpack.dispose();
+    });
+
+    it('does not capture JavaScript errors by default', async () => {
+        const onSubmit = vi.fn();
+        const bugpack = createBugPack({ onSubmit });
+        bugpack.enable();
+        window.dispatchEvent(new ErrorEvent('error', { message: 'not captured' }));
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+        expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ javascriptErrors: [] });
         bugpack.dispose();
     });
 
@@ -116,12 +207,12 @@ describe('report flow', () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
             diagnostics: { console: { enabled: true } },
-            floatingButton: { enabled: false },
             onSubmit,
         });
         bugpack.enable();
         console.error(...Array.from({ length: 22 }, (_, index) => index));
-        await bugpack.report();
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
         const report = onSubmit.mock.calls[0]?.[0] as BugPackObjectReport;
         expect(report.consoleLogs[0]?.arguments).toHaveLength(21);
         expect(report.consoleLogs[0]?.arguments.at(-1)).toBe('[2 arguments omitted]');
@@ -131,18 +222,20 @@ describe('report flow', () => {
     it('does not submit when the user cancels', async () => {
         mocks.openReportDialog.mockResolvedValue(undefined);
         const onSubmit = vi.fn();
-        await createBugPack({ floatingButton: { enabled: false }, onSubmit }).report();
+        const bugpack = createBugPack({ onSubmit });
+        bugpack.report();
+        await vi.waitFor(() => expect(mocks.openReportDialog).toHaveBeenCalledOnce());
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
     it('does not submit a partial report when metadata resolution fails', async () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
-            resolveMetadata: () => Promise.reject(new Error('context failed')),
-            floatingButton: { enabled: false },
+            metadata: () => Promise.reject(new Error('context failed')),
             onSubmit,
         });
-        await expect(bugpack.report()).rejects.toThrow('context failed');
+        expect(bugpack.report()).toBeUndefined();
+        await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
         expect(onSubmit).not.toHaveBeenCalled();
         expect(mocks.capturePage).not.toHaveBeenCalled();
     });
@@ -150,25 +243,25 @@ describe('report flow', () => {
     it('aborts metadata resolution when disabled', async () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
-            resolveMetadata: () => new Promise(() => undefined),
-            floatingButton: { enabled: false },
+            metadata: () => new Promise(() => undefined),
             onSubmit,
         });
-        const flow = bugpack.report();
+        expect(bugpack.report()).toBeUndefined();
         await Promise.resolve();
         bugpack.disable();
-        await expect(flow).rejects.toMatchObject({ name: 'AbortError' });
+        await Promise.resolve();
+        expect(console.error).not.toHaveBeenCalled();
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
-    it('rejects a non-object metadata resolver result at runtime', async () => {
+    it('handles a non-object metadata resolver result internally', async () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
-            resolveMetadata: (() => ['invalid']) as never,
-            floatingButton: { enabled: false },
+            metadata: (() => ['invalid']) as never,
             onSubmit,
         });
-        await expect(bugpack.report()).rejects.toThrow(/JSON-safe object/u);
+        expect(bugpack.report()).toBeUndefined();
+        await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
@@ -181,22 +274,24 @@ describe('report flow', () => {
             }),
         );
         const onSubmit = vi.fn();
-        const bugpack = createBugPack({ floatingButton: { enabled: false }, onSubmit });
-        const flow = bugpack.report();
+        const bugpack = createBugPack({ onSubmit });
+        bugpack.report();
         await vi.waitFor(() => expect(mocks.openReportDialog).toHaveBeenCalled());
         bugpack.disable();
         finishEditor();
-        await expect(flow).rejects.toMatchObject({ name: 'AbortError' });
+        await Promise.resolve();
+        await Promise.resolve();
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
     it('packages a manifest and binary images as ZIP output', async () => {
         const onSubmit = vi.fn();
-        await createBugPack({
+        const bugpack = createBugPack({
             output: { format: 'zip' },
-            floatingButton: { enabled: false },
             onSubmit,
-        }).report();
+        });
+        bugpack.report();
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
         const archive = onSubmit.mock.calls[0]?.[0] as Blob;
         expect(archive.type).toBe('application/zip');
         const files = unzipSync(new Uint8Array(await archive.arrayBuffer()));
@@ -214,16 +309,19 @@ describe('report flow', () => {
         });
     });
 
-    it('rejects concurrent report flows', async () => {
+    it('ignores concurrent report flows', async () => {
         let release!: () => void;
         mocks.capturePage.mockReturnValue(
             new Promise<Blob>((resolve) => (release = () => resolve(PNG))),
         );
-        const bugpack = createBugPack({ floatingButton: { enabled: false }, onSubmit: vi.fn() });
-        const first = bugpack.report();
-        await Promise.resolve();
-        await expect(bugpack.report()).rejects.toThrow(/already in progress/u);
+        const onSubmit = vi.fn();
+        const bugpack = createBugPack({ onSubmit });
+        expect(bugpack.report()).toBeUndefined();
+        await vi.waitFor(() => expect(mocks.capturePage).toHaveBeenCalledOnce());
+        expect(bugpack.report()).toBeUndefined();
+        expect(mocks.capturePage).toHaveBeenCalledOnce();
+        expect(console.error).not.toHaveBeenCalled();
         release();
-        await first;
+        await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
     });
 });

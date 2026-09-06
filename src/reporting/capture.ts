@@ -82,7 +82,9 @@ export async function capturePage(maskSelectors: string[], signal: AbortSignal):
     const pixelScale = Math.sqrt(MAX_CAPTURE_PIXELS / Math.max(1, width * height));
     const scale = Math.min(deviceScale, pixelScale);
     const canvas = await html2canvas(documentElement, {
-        backgroundColor: null,
+        // Match the browser's opaque canvas when the page has no painted background.
+        // html2canvas still prefers explicit html/body backgrounds over this fallback.
+        backgroundColor: '#ffffff',
         logging: false,
         useCORS: true,
         x: scrollX,
