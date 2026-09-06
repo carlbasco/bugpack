@@ -27,7 +27,7 @@ Or:
 yarn add @bugpack/core
 ```
 
-BugPack is an ES module intended for browser applications. Creating reports requires browser APIs such as the DOM, Canvas, `Blob`, and `AbortController`. The package declares Node.js 20 or later for build and development tooling.
+BugPack is an ES module intended for browser applications. Creating reports requires browser APIs such as the DOM, Canvas, `Blob`, and `AbortController`. Applications can install and bundle the package with Node.js 18 or later. Developing BugPack itself requires Node.js 20 or later because of its test tooling.
 
 ## Quick start
 
