@@ -1,5 +1,5 @@
-import * as html2canvasModule from 'html2canvas';
-import type { Options as Html2CanvasOptions } from 'html2canvas';
+import * as html2canvasModule from 'html2canvas-pro';
+import type { Options as Html2CanvasOptions } from 'html2canvas-pro';
 import { throwIfAborted } from '../shared/abort.js';
 
 type Html2Canvas = (
@@ -94,10 +94,11 @@ export async function capturePage(maskSelectors: string[], signal: AbortSignal):
         scrollX,
         scrollY,
         scale,
+        signal,
         windowWidth: window.innerWidth,
         windowHeight: window.innerHeight,
-        ignoreElements: (element) => element.hasAttribute('data-bugpack-ui'),
-        onclone: (clonedDocument) => maskDocument(clonedDocument, maskSelectors),
+        ignoreElements: (element: Element) => element.hasAttribute('data-bugpack-ui'),
+        onclone: (clonedDocument: Document) => maskDocument(clonedDocument, maskSelectors),
     });
     throwIfAborted(signal);
     const screenshot = await canvasToBlob(canvas);

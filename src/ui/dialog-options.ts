@@ -2,6 +2,7 @@ import type { DialogLabels, DialogOptions } from './types.js';
 
 export const DEFAULT_DIALOG_LABELS: DialogLabels = {
     title: 'Report a bug',
+    preparingScreenshot: 'Preparing screenshot…',
     instructions: 'Draw or place an adjustable shape to highlight the problem',
     close: 'Close report dialog',
     annotationTools: 'Annotation tools',
@@ -11,8 +12,8 @@ export const DEFAULT_DIALOG_LABELS: DialogLabels = {
     pencil: 'Pencil',
     rectangle: 'Rectangle',
     select: 'Select or adjust',
-    eraser: 'Erase annotation',
-    annotationColor: 'Annotation color',
+    eraser: 'Erase',
+    annotationColor: 'Color',
     fit: 'Fit screenshot',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
@@ -24,6 +25,9 @@ export const DEFAULT_DIALOG_LABELS: DialogLabels = {
     maximize: 'Maximize dialog',
     restore: 'Restore dialog',
 };
+
+export const DEFAULT_THEME_COLOR = '#537c0b';
+const HEX_COLOR = /^#[\da-f]{6}$/iu;
 
 export function normalizeDialogOptions(options: DialogOptions = {}): Required<DialogOptions> {
     if (options === null || typeof options !== 'object' || Array.isArray(options)) {
@@ -46,13 +50,17 @@ export function normalizeDialogOptions(options: DialogOptions = {}): Required<Di
         }
         labels[key] = value;
     }
-    const color = options.appearance?.submitButtonColor ?? '#556b2f';
-    if (typeof color !== 'string' || !/^#[\da-f]{6}$/iu.test(color)) {
+    const themeColor = options.appearance?.themeColor ?? DEFAULT_THEME_COLOR;
+    if (typeof themeColor !== 'string' || !HEX_COLOR.test(themeColor)) {
+        throw new TypeError('dialog.appearance.themeColor must be a six-digit hexadecimal color.');
+    }
+    const submitButtonColor = options.appearance?.submitButtonColor ?? themeColor;
+    if (typeof submitButtonColor !== 'string' || !HEX_COLOR.test(submitButtonColor)) {
         throw new TypeError(
             'dialog.appearance.submitButtonColor must be a six-digit hexadecimal color.',
         );
     }
-    return { labels, appearance: { submitButtonColor: color } };
+    return { labels, appearance: { themeColor, submitButtonColor } };
 }
 
 export function buttonTextColor(color: string): string {
@@ -63,4 +71,22 @@ export function buttonTextColor(color: string): string {
     const luminance =
         (linear[0] ?? 0) * 0.2126 + (linear[1] ?? 0) * 0.7152 + (linear[2] ?? 0) * 0.0722;
     return luminance > 0.179 ? '#000000' : '#ffffff';
+}
+
+function blendHex(color: string, target: number, targetAmount: number): string {
+    const channels = [1, 3, 5].map((offset) =>
+        Math.round(
+            Number.parseInt(color.slice(offset, offset + 2), 16) * (1 - targetAmount) +
+                target * targetAmount,
+        ),
+    );
+    return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Light and dark UI tones derived from the configured base accent color. */
+export function themeColorVariants(themeColor: string): { light: string; dark: string } {
+    return {
+        light: blendHex(themeColor, 255, 0.9),
+        dark: blendHex(themeColor, 0, 0.28),
+    };
 }

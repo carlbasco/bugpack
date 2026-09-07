@@ -126,17 +126,6 @@ dialog[data-bugpack-ui] .annotation-color {
     align-items: center;
     justify-content: center;
 }
-dialog[data-bugpack-ui] .annotation-color span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-}
 dialog[data-bugpack-ui] .annotation-color input {
     width: 34px;
     height: 34px;
@@ -156,6 +145,34 @@ dialog[data-bugpack-ui] .canvas-wrap {
     overflow: scroll;
     scrollbar-gutter: stable;
     scrollbar-width: none;
+}
+dialog[data-bugpack-ui] form.is-preparing .annotation-toolbar,
+dialog[data-bugpack-ui] form.is-preparing .canvas-wrap canvas,
+dialog[data-bugpack-ui] form.is-preparing > label,
+dialog[data-bugpack-ui] form.is-preparing .actions [data-action='clear'],
+dialog[data-bugpack-ui] form.is-preparing .actions [value='confirm'],
+dialog[data-bugpack-ui] form.is-preparing .dialog-maximize {
+    display: none;
+}
+dialog[data-bugpack-ui] form.is-preparing .canvas-wrap {
+    display: grid;
+    place-items: center;
+    min-height: 180px;
+    background: #fafafa;
+}
+dialog[data-bugpack-ui] form.is-preparing .canvas-wrap::before {
+    width: 28px;
+    height: 28px;
+    border: 3px solid #d4d4d4;
+    border-top-color: var(--bugpack-theme-color, #537c0b);
+    border-radius: 50%;
+    content: '';
+    animation: bugpack-spin 700ms linear infinite;
+}
+@keyframes bugpack-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 dialog[data-bugpack-ui] .canvas-wrap.is-scrolling {
     scrollbar-color: #a3a3a3 transparent;
@@ -213,8 +230,8 @@ dialog[data-bugpack-ui] button {
     cursor: pointer;
 }
 dialog[data-bugpack-ui] button.primary {
-    border-color: var(--bugpack-submit-color, #556b2f);
-    background: var(--bugpack-submit-color, #556b2f);
+    border-color: var(--bugpack-submit-color, #537c0b);
+    background: var(--bugpack-submit-color, #537c0b);
     color: var(--bugpack-submit-text, white);
 }
 
@@ -242,9 +259,9 @@ dialog[data-bugpack-ui].is-maximized .canvas-wrap {
     max-height: none;
 }
 dialog[data-bugpack-ui] .annotation-toolbar button[aria-pressed='true'] {
-    border-color: #556b2f;
-    background: #eef2e3;
-    color: #33431d;
+    border-color: var(--bugpack-theme-dark, #3c5908);
+    background: var(--bugpack-theme-light, #eef2e7);
+    color: var(--bugpack-theme-dark, #3c5908);
     font-weight: 700;
 }
 @media (max-width: 620px) {

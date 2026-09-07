@@ -32,6 +32,7 @@ type Interaction =
     | { type: 'pencil'; index: number }
     | { type: 'shape'; index: number; origin: Point }
     | { type: 'move'; index: number; origin: Point; annotation: RectangleAnnotation }
+    | { type: 'move-pencil'; index: number; origin: Point; points: Point[] }
     | {
           type: 'pan';
           clientX: number;
@@ -47,23 +48,37 @@ type Interaction =
       };
 
 const DEFAULT_ANNOTATION_COLOR = '#ef4444';
-const SELECTION_COLOR = '#556b2f';
+const DEFAULT_SELECTION_COLOR = '#537c0b';
 const HEX_COLOR = /^#[\da-f]{6}$/iu;
 const MAX_PENCIL_POINTS = 10_000;
 
 function drawCursor(tool: AnnotationTool = 'pencil'): string {
-    // White outlines keep the original Paint-inspired artwork visible on dark screenshots.
     const artwork =
         tool === 'rectangle'
             ? '<path d="M12 3v18M3 12h18" stroke="white" stroke-width="3"/><path d="M12 3v18M3 12h18" stroke="black" stroke-width="1"/>'
-            : '<path d="m3 21 2-7L16 3l5 5-11 11-7 2Z" fill="white" stroke="white" stroke-width="3" stroke-linejoin="round"/><path d="m3 21 2-7L16 3l5 5-11 11-7 2Z" fill="white" stroke="black" stroke-width="1" stroke-linejoin="round"/><path d="m5 14 5 5M14 5l5 5M7 16l9-9" fill="none" stroke="black"/><path d="m3 21 1-4 3 3Z" fill="black"/>';
+            : '<path d="M21.707 5.565 18.435 2.293a1 1 0 0 0-1.414 0L3.93 15.384a.991.991 0 0 0-.242.39l-1.636 4.91A1 1 0 0 0 3 22a.987.987 0 0 0 .316-.052l4.91-1.636a.991.991 0 0 0 .39-.242L21.707 6.979a1 1 0 0 0 0-1.414ZM7.369 18.489l-2.788.93.93-2.788 8.943-8.944 1.859 1.859ZM17.728 8.132l-1.86-1.86 1.86-1.858 1.858 1.858Z" fill="black"/>';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">${artwork}</svg>`;
     const hotspot = tool === 'rectangle' ? '12 12' : '3 21';
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspot}, crosshair`;
 }
 
 function eraserCursor(): string {
-    return 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22%3E%3Cpath d=%22m3 15 10-12 8 7-10 12H9Z%22 fill=%22white%22 stroke=%22black%22 stroke-width=%222%22/%3E%3Cpath d=%22m7 10 8 7%22 stroke=%22black%22/%3E%3C/svg%3E") 3 15, crosshair';
+    const mainPath =
+        'm5.505 11.41.53.53-.53-.53ZM3 14.952h-.75H3ZM9.048 21v.75V21ZM11.41 5.505l-.53-.53.53.53Zm1.831 12.339a.75.75 0 1 0 1.06-1.06l-1.06 1.06ZM7.216 9.698a.75.75 0 0 0-1.06 1.06l1.06-1.06Zm10.749 2.362-5.905 5.905 1.06 1.06 5.905-5.905-1.06-1.06ZM6.035 11.94 11.94 6.035l-1.06-1.06-5.905 5.905 1.06 1.06Zm0 6.025c-.85-.85-1.433-1.435-1.813-1.933-.366-.48-.472-.79-.472-1.08h-1.5c0 .749.312 1.375.78 1.989.456.597 1.125 1.264 1.945 2.084l1.06-1.06ZM4.975 10.88c-.82.82-1.49 1.486-1.945 2.083-.468.614-.78 1.24-.78 1.99h1.5c0-.29.106-.6.473-1.08.38-.498.962-1.084 1.812-1.934l-1.06-1.06Zm7.085 7.085c-.85.85-1.435 1.433-1.933 1.813-.48.366-.79.472-1.079.472v1.5c.749 0 1.375-.312 1.989-.78.597-.456 1.264-1.125 2.084-1.945l-1.06-1.06Zm-7.085 1.06c.82.82 1.487 1.49 2.084 1.945.614.468 1.24.78 1.989.78v-1.5c-.289 0-.6-.106-1.079-.473-.498-.38-1.084-.962-1.934-1.812l-1.06 1.06Zm12.99-12.99c.85.85 1.433 1.435 1.813 1.933.366.48.472.79.472 1.08h1.5c0-.749-.312-1.375-.78-1.989-.456-.597-1.125-1.264-1.945-2.084l-1.06 1.06Zm1.06 7.085c.82-.82 1.49-1.487 1.945-2.084.468-.614.78-1.24.78-1.989h-1.5c0 .289-.106.6-.473 1.079-.38.498-.962 1.084-1.812 1.934l1.06 1.06Zm0-8.146c-.82-.82-1.487-1.49-2.084-1.945-.614-.468-1.24-.78-1.989-.78v1.5c.289 0 .6.106 1.079.473.498.38 1.084.962 1.934 1.812l1.06-1.06ZM11.94 6.035c.85-.85 1.435-1.433 1.933-1.813.48-.366.79-.472 1.079-.472v-1.5c-.749 0-1.375.312-1.989.78-.597.456-1.264 1.125-2.084 1.945l1.06 1.06Z';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="${mainPath}" fill="#1c274c"/><path d="M9 21h12" fill="none" stroke="#1c274c" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 3 15, crosshair`;
+}
+
+function moveCursor(): string {
+    const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 3v18M12 3 9 6M12 3l3 3M12 21l3-3M12 21l-3-3M3 12h18M3 12l3 3M3 12l3-3M21 12l-3-3M21 12l-3 3" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, move`;
+}
+
+function panCursor(): string {
+    const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="black" d="M12.6 4c-.2 0-.4 0-.6 0 0-.2-.2-.6-.4-.8s-.5-.4-1.1-.4c-.2 0-.4 0-.6.1-.1-.2-.2-.3-.3-.5-.2-.2-.5-.4-1.1-.4-.8 0-1.2.5-1.4 1-.1 0-.3-.1-.5-.1-.5 0-.8.2-1.1.4-.5.6-.5 1.4-.5 1.5v.4c-.6 0-1.1.2-1.4.5-.6.7-.6 1.6-.6 2.8v.7c0 1.4.7 2.1 1.4 2.8l.3.4c1.3 1.2 2.5 1.6 5.1 1.6 2.9 0 4.2-1.6 4.2-5.1V6.8c0-.7-.2-2.1-1.4-2.4ZM10.5 3.8c.4 0 .5.4.5.6v.8c0 .3.2.5.4.5.3 0 .5-.1.5-.4 0 0 0-.4.4-.3.6.2.7 1.1.7 1.3v2.6c0 3.4-1.3 4.1-3.2 4.1-2.4 0-3.3-.3-4.3-1.3-.1-.1-.2-.2-.4-.4-.7-.7-1.1-1.1-1.1-2.1v-.6c0-1 0-1.8.3-2.1.1-.2.4-.3.7-.3v.8l-.3 1.2c0 .1 0 .1.1.1.1.1.2 0 .2 0l1-1.2v-2c0-.1 0-.6.2-.8.1-.1.2-.2.4-.2.3 0 .4.2.4.4v.4c0 .2.2.5.5.5s.5-.3.5-.5V3.4c0-.1 0-.5.5-.5.3 0 .5.2.5.5v1.2c0 .3.2.6.5.6s.5-.3.5-.5v-.5c0-.3.2-.5.5-.5Z"/></svg>';
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 5 5, grab`;
 }
 
 function bounds(shape: RectangleAnnotation): RectangleAnnotation {
@@ -101,6 +116,7 @@ export function createAnnotationEditor(
     context: CanvasRenderingContext2D,
     image: CanvasImageSource,
     scrollContainer?: HTMLElement,
+    selectionColor = DEFAULT_SELECTION_COLOR,
 ): AnnotationEditor {
     const annotations: Annotation[] = [];
     const lineWidth = Math.max(3, canvas.width / 250);
@@ -145,6 +161,26 @@ export function createAnnotationEditor(
     const annotationBounds = (annotation: RectangleAnnotation): RectangleBounds =>
         bounds(annotation);
 
+    const movePencil = (points: Point[], origin: Point, point: Point): Point[] => {
+        if (points.length === 0) return [];
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const pencilPoint of points) {
+            minX = Math.min(minX, pencilPoint.x);
+            minY = Math.min(minY, pencilPoint.y);
+            maxX = Math.max(maxX, pencilPoint.x);
+            maxY = Math.max(maxY, pencilPoint.y);
+        }
+        const offsetX = Math.max(-minX, Math.min(canvas.width - maxX, point.x - origin.x));
+        const offsetY = Math.max(-minY, Math.min(canvas.height - maxY, point.y - origin.y));
+        return points.map((pencilPoint) => ({
+            x: pencilPoint.x + offsetX,
+            y: pencilPoint.y + offsetY,
+        }));
+    };
+
     const paint = (showSelection = true): void => {
         context.clearRect(0, 0, canvas.width, canvas.height);
         context.drawImage(image, 0, 0);
@@ -175,7 +211,7 @@ export function createAnnotationEditor(
             const [first, ...remaining] = selected.points;
             if (first === undefined) return;
             context.beginPath();
-            context.strokeStyle = SELECTION_COLOR;
+            context.strokeStyle = selectionColor;
             context.lineWidth = lineWidth + Math.max(4, lineWidth);
             context.moveTo(first.x, first.y);
             for (const point of remaining) context.lineTo(point.x, point.y);
@@ -189,7 +225,7 @@ export function createAnnotationEditor(
             return;
         }
         const rectangle = annotationBounds(selected);
-        context.strokeStyle = SELECTION_COLOR;
+        context.strokeStyle = selectionColor;
         context.lineWidth = Math.max(2, lineWidth / 2);
         context.setLineDash([handleSize, handleSize / 2]);
         context.strokeRect(rectangle.x, rectangle.y, rectangle.width, rectangle.height);
@@ -387,8 +423,16 @@ export function createAnnotationEditor(
                 selectedIndex = annotationAt(point);
                 const annotation =
                     selectedIndex === undefined ? undefined : annotations[selectedIndex];
-                if (annotation !== undefined && annotation.type !== 'pencil') {
-                    canvas.style.cursor = 'move';
+                if (annotation?.type === 'pencil') {
+                    canvas.style.cursor = moveCursor();
+                    interaction = {
+                        type: 'move-pencil',
+                        index: selectedIndex as number,
+                        origin: point,
+                        points: annotation.points.map((pencilPoint) => ({ ...pencilPoint })),
+                    };
+                } else if (annotation !== undefined) {
+                    canvas.style.cursor = moveCursor();
                     interaction = {
                         type: 'move',
                         index: selectedIndex as number,
@@ -408,7 +452,7 @@ export function createAnnotationEditor(
                         scrollLeft: scrollContainer.scrollLeft,
                         scrollTop: scrollContainer.scrollTop,
                     };
-                    canvas.style.cursor = 'move';
+                    canvas.style.cursor = panCursor();
                 } else {
                     interaction = undefined;
                 }
@@ -453,11 +497,13 @@ export function createAnnotationEditor(
                     const handle =
                         selected?.type === 'rectangle' ? hitHandle(selected, point) : undefined;
                     canvas.style.cursor =
-                        handle === undefined
+                        handle === undefined && annotationAt(point) === undefined
                             ? 'default'
-                            : handle === 'north-west' || handle === 'south-east'
-                              ? 'nwse-resize'
-                              : 'nesw-resize';
+                            : handle === undefined
+                              ? moveCursor()
+                              : handle === 'north-west' || handle === 'south-east'
+                                ? 'nwse-resize'
+                                : 'nesw-resize';
                 }
                 return;
             }
@@ -506,6 +552,8 @@ export function createAnnotationEditor(
                 );
                 annotation.width = interaction.annotation.width;
                 annotation.height = interaction.annotation.height;
+            } else if (interaction.type === 'move-pencil' && annotation.type === 'pencil') {
+                annotation.points = movePencil(interaction.points, interaction.origin, point);
             } else if (interaction.type === 'resize' && annotation.type !== 'pencil') {
                 updateResize(annotation, interaction, point);
             }

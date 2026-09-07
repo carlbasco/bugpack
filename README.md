@@ -95,7 +95,8 @@ All diagnostic collectors are opt-in. Calling `enable()` only starts collectors 
 | `diagnostics.network.capture`             | `['fetch', 'xhr']`                |
 | `diagnostics.network.statuses`            | omitted; retain all results       |
 | `diagnostics.network.maxRequests`         | `50`                              |
-| `dialog.appearance.submitButtonColor`     | `'#556b2f'`                       |
+| `dialog.appearance.themeColor`            | `'#537c0b'`                       |
+| `dialog.appearance.submitButtonColor`     | theme color                       |
 
 ## Metadata
 
@@ -262,7 +263,7 @@ const bugpack = createBugPack({
             cancel: 'Go back',
             eraser: 'Erase annotation',
         },
-        appearance: { submitButtonColor: '#2563eb' },
+        appearance: { themeColor: '#2563eb' },
     },
     onSubmit: saveReport,
 });
@@ -270,9 +271,11 @@ const bugpack = createBugPack({
 
 Omitted labels use their English defaults. Overrides are plain text, not HTML, and must be non-empty strings.
 
-Available keys are `title`, `instructions`, `close`, `annotationTools`, `drawingTools`, `annotationOptions`, `screenshotView`, `pencil`, `rectangle`, `select`, `eraser`, `annotationColor`, `fit`, `zoomIn`, `zoomOut`, `canvas`, `comment`, `clear`, `cancel`, `submit`, `maximize`, and `restore`. Tool labels also provide their tooltips and accessible names.
+Available keys are `title`, `preparingScreenshot`, `instructions`, `close`, `annotationTools`, `drawingTools`, `annotationOptions`, `screenshotView`, `pencil`, `rectangle`, `select`, `eraser`, `annotationColor`, `fit`, `zoomIn`, `zoomOut`, `canvas`, `comment`, `clear`, `cancel`, `submit`, `maximize`, and `restore`. Tool labels also provide their tooltips and accessible names.
 
-`submitButtonColor` must be an opaque six-digit hexadecimal color. BugPack chooses contrasting button text and creates the hover treatment.
+`themeColor` must be an opaque six-digit hexadecimal color. BugPack derives a light background and dark border/icon color from it for active action icons, and also uses it for the loading spinner and annotation selection. The Generate Report button uses this color by default.
+
+`submitButtonColor` is an optional opaque six-digit hexadecimal override for only the Generate Report button. BugPack chooses contrasting button text and creates the hover treatment.
 
 `reportButtonText` remains available as a legacy title option. `dialog.labels.title` takes precedence when both are provided.
 
@@ -291,16 +294,28 @@ Empty rectangle interiors are not eraser targets, and eraser hover highlights ar
 
 Calling `report()`:
 
-1. Resolves current metadata.
-2. Waits for currently captured network response bodies when applicable.
-3. Snapshots browser, page, JavaScript error, console, and network evidence.
-4. Captures the visible browser viewport.
-5. Opens the annotation and optional-comment dialog.
-6. Calls `onSubmit` only after the user confirms.
+1. Opens a cancellable **Preparing screenshot…** dialog.
+2. Resolves current metadata and captures the visible browser viewport in parallel.
+3. Waits for currently captured network response bodies, then snapshots browser, page, JavaScript error, console, and network evidence.
+4. Replaces the loading state with the annotation and optional-comment editor once the screenshot is ready.
+5. Calls `onSubmit` only after the user confirms.
 
 Closing or cancelling the dialog does not call `onSubmit`.
 
-Resolver, capture, dialog, packaging, and `onSubmit` failures are handled internally. BugPack writes a generic console error without exposing the underlying error, and the user can retry. Invalid initial configuration and enabling a disposed instance can still throw synchronously because those are developer setup errors.
+Resolver, capture, dialog, packaging, and `onSubmit` failures are handled internally. BugPack writes a privacy-safe console error with a stable code, without exposing the underlying error, and the user can retry. Invalid initial configuration and enabling a disposed instance can still throw synchronously because those are developer setup errors.
+
+### Report error codes
+
+| Code    | Meaning                                                       |
+| ------- | ------------------------------------------------------------- |
+| `BP100` | The report dialog or screenshot editor could not be prepared. |
+| `BP110` | The visible-page screenshot could not be captured.            |
+| `BP200` | Metadata or diagnostic evidence could not be collected.       |
+| `BP300` | The ZIP report archive could not be created.                  |
+| `BP400` | The application's `onSubmit` callback failed.                 |
+| `BP900` | An unexpected report-generation failure occurred.             |
+
+For example, a screenshot failure is logged as `[BugPack:BP110] Screenshot capture failed. Please try again.` The original caught error is deliberately not logged, as it can contain private application data. User cancellation, disabling, and disposal are expected actions and do not log an error.
 
 ## Output formats
 
@@ -352,7 +367,7 @@ const bugpack = createBugPack({
 });
 ```
 
-The callback receives an `application/zip` `Blob` containing `report.json`, `screenshot.png`, and `annotated-screenshot.png`. Your application chooses whether and where to upload or download it. The output option is a TypeScript discriminant, so `onSubmit` receives the correct report or `Blob` type.
+The callback receives an `application/zip` `Blob` containing `report.json`, `screenshot.png`, and `annotated-screenshot.png`. The JSON file contains diagnostics, metadata, and the user comment; the images remain separate PNG files. Your application chooses whether and where to upload or download it. The output option is a TypeScript discriminant, so `onSubmit` receives the correct report or `Blob` type.
 
 ## Complete example
 
@@ -394,7 +409,7 @@ const bugpack = createBugPack({
     },
     dialog: {
         labels: { title: 'Report a problem', submit: 'Send report' },
-        appearance: { submitButtonColor: '#2563eb' },
+        appearance: { themeColor: '#2563eb' },
     },
     output: { format: 'zip' },
     onSubmit: async (archive) => {
@@ -429,7 +444,7 @@ import type { BugPackObjectReport, JavascriptErrorType, NetworkStatusGroup } fro
 
 ## Screenshot limitations
 
-Screenshot capture uses `html2canvas`, which reconstructs the visible viewport from the DOM instead of accessing operating-system pixels. Cross-origin images without CORS permission, browser plug-ins, video frames, and some advanced CSS may not render exactly.
+Screenshot capture uses `html2canvas-pro`, which reconstructs the visible viewport from the DOM instead of accessing operating-system pixels. It supports CSS Color 4 functions such as `color()`, `oklch()`, `lab()`, and `lch()`. Cross-origin images without CORS permission, browser plug-ins, video frames, and some advanced CSS may not render exactly.
 
 Pages without an explicit background use a white fallback so the editor background does not alter their appearance. Explicit page backgrounds are respected. This does not guarantee pixel-identical colors for every CSS effect or unsupported color format. Capture failures do not submit a partial report.
 

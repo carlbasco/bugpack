@@ -1,5 +1,6 @@
 export interface DialogLabels {
     title: string;
+    preparingScreenshot: string;
     instructions: string;
     close: string;
     annotationTools: string;
@@ -26,12 +27,15 @@ export interface DialogLabels {
 export interface DialogOptions {
     labels?: Partial<DialogLabels>;
     appearance?: {
+        /** Base accent color. Related dialog highlights are derived from this value. */
+        themeColor?: string;
         /** Opaque six-digit hexadecimal color, for example #2563eb. */
         submitButtonColor?: string;
     };
 }
 
 export interface ReportDialogResult {
+    screenshot: Blob;
     annotatedScreenshot: Blob;
     userComment: string;
 }

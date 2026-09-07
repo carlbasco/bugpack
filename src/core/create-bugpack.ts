@@ -15,6 +15,35 @@ import type { NetworkLogRecord } from '../diagnostics/network/types.js';
 import type { JavascriptErrorRecord } from '../diagnostics/javascript-errors/types.js';
 import type { BugPackObjectReport } from '../reporting/types.js';
 
+type ReportFailureCode = 'BP100' | 'BP110' | 'BP200' | 'BP300' | 'BP400' | 'BP900';
+
+class ReportFailure extends Error {
+    constructor(
+        readonly code: ReportFailureCode,
+        message: string,
+    ) {
+        super(message);
+        this.name = 'BugPackReportError';
+    }
+}
+
+function isReportFailure(error: unknown): error is ReportFailure {
+    return error instanceof ReportFailure;
+}
+
+async function reportPhase<T>(
+    code: ReportFailureCode,
+    message: string,
+    operation: () => Promise<T> | T,
+): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (isReportFailure(error)) throw error;
+        throw new ReportFailure(code, message);
+    }
+}
+
 export function createBugPack(options: ZipBugPackOptions): BugPack;
 export function createBugPack(options: ObjectBugPackOptions): BugPack;
 export function createBugPack(options: BugPackOptions): BugPack;
@@ -77,30 +106,42 @@ export function createBugPack(options: BugPackOptions): BugPack {
         const controller = new AbortController();
         activeReport = controller;
         try {
-            const diagnosticReport = await buildDiagnosticReport(
-                normalized,
-                privacy,
-                () => consoleLogs.snapshot(),
-                () => networkCollector.snapshot(),
-                () => javascriptErrors.snapshot(),
-                () => networkCollector.waitForResponseBodies(controller.signal),
-                controller.signal,
-            );
-            const screenshot = await capturePage(
-                normalized.privacy.maskElementSelectors,
-                controller.signal,
-            );
-            const result = await openReportDialog(
-                screenshot,
+            const dialog = openReportDialog(
+                () =>
+                    reportPhase('BP110', 'Screenshot capture failed.', () =>
+                        capturePage(normalized.privacy.maskElementSelectors, controller.signal),
+                    ),
                 controller.signal,
                 normalized.reportButtonText,
                 normalized.dialog,
+                () =>
+                    controller.abort(
+                        new DOMException('BugPack report was cancelled.', 'AbortError'),
+                    ),
             );
+            const diagnosticReportPromise = reportPhase(
+                'BP200',
+                'Report diagnostics could not be collected.',
+                () =>
+                    buildDiagnosticReport(
+                        normalized,
+                        privacy,
+                        () => consoleLogs.snapshot(),
+                        () => networkCollector.snapshot(),
+                        () => javascriptErrors.snapshot(),
+                        () => networkCollector.waitForResponseBodies(controller.signal),
+                        controller.signal,
+                    ),
+            );
+            const [diagnosticReport, result] = await Promise.all([
+                diagnosticReportPromise,
+                reportPhase('BP100', 'Report dialog could not be prepared.', () => dialog),
+            ]);
             if (result === undefined) return;
             throwIfAborted(controller.signal);
             const objectReport: BugPackObjectReport = {
                 ...diagnosticReport,
-                screenshot: { contentType: 'image/png', data: screenshot },
+                screenshot: { contentType: 'image/png', data: result.screenshot },
                 annotatedScreenshot: {
                     contentType: 'image/png',
                     data: result.annotatedScreenshot,
@@ -108,24 +149,38 @@ export function createBugPack(options: BugPackOptions): BugPack {
                 userComment: result.userComment,
             };
             if (normalized.outputFormat === 'zip') {
-                const output = await createZipOutput(objectReport);
+                const output = await reportPhase(
+                    'BP300',
+                    'Report archive could not be created.',
+                    () => createZipOutput(objectReport),
+                );
                 throwIfAborted(controller.signal);
-                await normalized.onSubmit(output);
+                await reportPhase('BP400', 'Report submission failed.', () =>
+                    normalized.onSubmit(output),
+                );
             } else {
                 throwIfAborted(controller.signal);
-                await normalized.onSubmit(objectReport);
+                await reportPhase('BP400', 'Report submission failed.', () =>
+                    normalized.onSubmit(objectReport),
+                );
             }
         } catch (error) {
-            if (!controller.signal.aborted) throw error;
+            if (!controller.signal.aborted) {
+                controller.abort(new DOMException('BugPack report failed.', 'AbortError'));
+                throw error;
+            }
         } finally {
             if (activeReport === controller) activeReport = undefined;
         }
     };
 
-    const logReportFailure = (): void => {
+    const logReportFailure = (error: unknown): void => {
+        const failure = isReportFailure(error)
+            ? error
+            : new ReportFailure('BP900', 'Report generation failed.');
         try {
             // Do not expose potentially sensitive resolver or submission errors.
-            console.error('BugPack could not generate or submit the report. Please try again.');
+            console.error(`[BugPack:${failure.code}] ${failure.message} Please try again.`);
         } catch {
             // A host console override must not break the application.
         }

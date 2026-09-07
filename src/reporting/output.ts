@@ -2,13 +2,13 @@ import { strToU8, zip } from 'fflate';
 import type { BugPackObjectReport } from './types.js';
 
 export async function createZipOutput(report: BugPackObjectReport): Promise<Blob> {
-    const manifest = {
-        ...report,
-        screenshot: { contentType: 'image/png', file: 'screenshot.png' },
-        annotatedScreenshot: { contentType: 'image/png', file: 'annotated-screenshot.png' },
-    };
-    const screenshot = new Uint8Array(await report.screenshot.data.arrayBuffer());
-    const annotatedScreenshot = new Uint8Array(await report.annotatedScreenshot.data.arrayBuffer());
+    const {
+        screenshot: screenshotAsset,
+        annotatedScreenshot: annotatedScreenshotAsset,
+        ...manifest
+    } = report;
+    const screenshot = new Uint8Array(await screenshotAsset.data.arrayBuffer());
+    const annotatedScreenshot = new Uint8Array(await annotatedScreenshotAsset.data.arrayBuffer());
     const archive = await new Promise<Uint8Array>((resolve, reject) => {
         zip(
             {

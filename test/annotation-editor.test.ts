@@ -56,7 +56,7 @@ describe('annotation editor', () => {
         editor.setTool('select');
         expect(canvas.style.cursor).toBe('default');
         pointer('pointerdown', 100, 60);
-        expect(canvas.style.cursor).toBe('move');
+        expect(canvas.style.cursor).toContain('5 5, grab');
         pointer('pointermove', 130, 80);
         pointer('pointerup', 130, 80);
 
@@ -115,6 +115,56 @@ describe('annotation editor', () => {
         editor.deleteSelected();
 
         expect(stroke).toHaveBeenCalledTimes(strokesBeforeDelete);
+    });
+
+    it('moves a selected pencil stroke without allowing it outside the canvas', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 200;
+        canvas.height = 100;
+        vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+            bottom: 100,
+            height: 100,
+            left: 0,
+            right: 200,
+            top: 0,
+            width: 200,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+        });
+        const moveTo = vi.fn();
+        const context = {
+            beginPath: vi.fn(),
+            clearRect: vi.fn(),
+            drawImage: vi.fn(),
+            fillRect: vi.fn(),
+            lineCap: 'round',
+            lineJoin: 'round',
+            lineTo: vi.fn(),
+            lineWidth: 1,
+            moveTo,
+            setLineDash: vi.fn(),
+            stroke: vi.fn(),
+            strokeRect: vi.fn(),
+            strokeStyle: '#000',
+        } as unknown as CanvasRenderingContext2D;
+        const editor = createAnnotationEditor(canvas, context, {} as CanvasImageSource);
+        const pointer = (type: string, x: number, y: number): void => {
+            canvas.dispatchEvent(
+                new PointerEvent(type, { button: 0, clientX: x, clientY: y, pointerId: 1 }),
+            );
+        };
+
+        pointer('pointerdown', 20, 20);
+        pointer('pointermove', 80, 60);
+        pointer('pointerup', 80, 60);
+        editor.setTool('select');
+        pointer('pointerdown', 50, 40);
+        pointer('pointermove', 250, 140);
+        pointer('pointerup', 250, 140);
+        editor.prepareExport();
+
+        expect(moveTo).toHaveBeenLastCalledWith(140, 60);
     });
 
     it('draws, moves, resizes, and exports shapes with a visible drawing cursor', () => {
@@ -181,8 +231,10 @@ describe('annotation editor', () => {
 
         editor.setTool('select');
         expect(canvas.style.cursor).toBe('default');
+        pointer('pointermove', 50, 40);
+        expect(canvas.style.cursor).toContain('12 12, move');
         pointer('pointerdown', 50, 40);
-        expect(canvas.style.cursor).toBe('move');
+        expect(canvas.style.cursor).toContain('12 12, move');
         pointer('pointermove', 70, 50);
         pointer('pointerup', 70, 50);
         expect(canvas.style.cursor).toBe('default');

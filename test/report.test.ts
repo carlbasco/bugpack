@@ -21,10 +21,12 @@ const PNG = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
 beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mocks.capturePage.mockReset().mockResolvedValue(PNG);
-    mocks.openReportDialog.mockReset().mockResolvedValue({
-        annotatedScreenshot: PNG,
-        userComment: 'Broken button',
-    });
+    mocks.openReportDialog
+        .mockReset()
+        .mockImplementation(async (source: Blob | (() => Promise<Blob>)) => {
+            const screenshot = typeof source === 'function' ? await source() : source;
+            return { screenshot, annotatedScreenshot: PNG, userComment: 'Broken button' };
+        });
     history.replaceState({}, '', '/checkout?secret=yes#fragment');
     document.title = 'Checkout';
 });
@@ -49,7 +51,7 @@ describe('report flow', () => {
         await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
         expect(onSubmit).not.toHaveBeenCalled();
         expect(console.error).toHaveBeenCalledWith(
-            'BugPack could not generate or submit the report. Please try again.',
+            '[BugPack:BP110] Screenshot capture failed. Please try again.',
         );
         bugpack.report();
         await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
@@ -237,7 +239,32 @@ describe('report flow', () => {
         expect(bugpack.report()).toBeUndefined();
         await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
         expect(onSubmit).not.toHaveBeenCalled();
-        expect(mocks.capturePage).not.toHaveBeenCalled();
+        // Capture starts alongside metadata so the dialog can become ready sooner.
+        expect(mocks.capturePage).toHaveBeenCalledOnce();
+    });
+
+    it('identifies diagnostic and submission failures without exposing their causes', async () => {
+        const bugpack = createBugPack({
+            metadata: () => Promise.reject(new Error('token=secret')),
+            onSubmit: vi.fn(),
+        });
+        bugpack.report();
+        await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
+        expect(console.error).toHaveBeenCalledWith(
+            '[BugPack:BP200] Report diagnostics could not be collected. Please try again.',
+        );
+        expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining('token=secret'));
+
+        vi.mocked(console.error).mockClear();
+        const retry = createBugPack({
+            onSubmit: () => Promise.reject(new Error('password=secret')),
+        });
+        retry.report();
+        await vi.waitFor(() => expect(console.error).toHaveBeenCalledOnce());
+        expect(console.error).toHaveBeenCalledWith(
+            '[BugPack:BP400] Report submission failed. Please try again.',
+        );
+        expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining('password=secret'));
     });
 
     it('aborts metadata resolution when disabled', async () => {
@@ -284,7 +311,7 @@ describe('report flow', () => {
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
-    it('packages a manifest and binary images as ZIP output', async () => {
+    it('packages diagnostics and binary images as ZIP output', async () => {
         const onSubmit = vi.fn();
         const bugpack = createBugPack({
             output: { format: 'zip' },
@@ -305,8 +332,9 @@ describe('report flow', () => {
         const manifest = JSON.parse(new TextDecoder().decode(reportFile)) as unknown;
         expect(manifest).toMatchObject({
             formatVersion: 1,
-            screenshot: { contentType: 'image/png', file: 'screenshot.png' },
         });
+        expect(manifest).not.toHaveProperty('screenshot');
+        expect(manifest).not.toHaveProperty('annotatedScreenshot');
     });
 
     it('ignores concurrent report flows', async () => {
